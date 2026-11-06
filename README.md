@@ -1,78 +1,88 @@
-# ❄️ White War: Frost Harbor — الحرب البيضاء: ميناء الصقيع
+# ❄️ White War — الحرب البيضاء (v2: The Expedition)
 
 **⬇️ تحميل نسخة أندرويد (APK) / Download the Android APK:**
-**https://github.com/ahmedalgarbani/White_war/raw/main/releases/WhiteWar-v1.0.0.apk**
+**https://github.com/ahmedalgarbani/White_war/raw/main/releases/WhiteWar.apk**
 
 | | | | |
 |---|---|---|---|
-| ![title](docs/screenshots/1-title.jpg) | ![snow war](docs/screenshots/2-snow-war.jpg) | ![harbor](docs/screenshots/3-harbor.jpg) | ![chowder house](docs/screenshots/4-chowder-house.jpg) |
+| ![title](docs/screenshots/1-title.jpg) | ![snow war](docs/screenshots/2-snow-war.jpg) | ![crystal quarry](docs/screenshots/5-crystal-quarry.jpg) | ![timber hollow](docs/screenshots/6-timber-hollow.jpg) |
+| ![harbor](docs/screenshots/3-harbor.jpg) | ![boss raid](docs/screenshots/7-boss-raid.jpg) | ![expedition](docs/screenshots/8-expedition.jpg) | ![chowder house](docs/screenshots/4-chowder-house.jpg) |
 
 ---
 
 ## 🇸🇦 بالعربية
 
-لعبة **أصلية** مبنية بـ **Flutter** من نوع *Idle Arcade* (اجمع ← حضّر ← بِع ← وسّع)، بنفس روح أسلوب اللعب في الفيديو المرجعي لكن بهوية خاصة بها: شخصيات وعالم ورسوم وأصوات مولّدة كلها بالكود.
+لعبة **أصلية** مبنية بـ **Flutter** من نوع *Idle Arcade* (اجمع ← اصنع ← بِع ← وسّع) بهوية خاصة بها:
+كل الشخصيات والعالم والرسوم والأصوات مولّدة بالكود.
 
-### فكرة اللعبة
-أنت حارس **ميناء الصقيع** على ضفاف نهر جليدي:
-1. **اصطد** – قف على الرصيف وسترمي الحِراب تلقائياً على الأسماك (السمك الذهبي والعملاق يعطيك بلورات).
-2. **حضّر** – احمل السمك إلى طاولة الطاهي ليحوّله إلى **أقراص سمك**، ولاحقاً إلى **حساء السمك** في بيت الحساء.
-3. **بِع** – ضع الأقراص على الكشك ليشتريها الزبائن الجائعون، ثم اجمع العملات.
-4. **وسّع** – قف على المربعات المقفلة لتدفع وتفتح: صيادين، حمّالين، نُدُل، مدافع ثلج، بيت الحساء، و**منارة الشفق** (تضاعف أسعار البيع ×2).
+### 🗺️ رحلة من 3 مناطق — ولا تنتهي
+| المنطقة | تجمع | تصنع وتبيع | أعداء حرب الثلج | المعلم الأخير |
+|---|---|---|---|---|
+| ❄️ ميناء الصقيع | تصطاد السمك بالحربة من الرصيف | أقراص السمك + حساء السمك | ذئاب الصقيع | منارة الشفق |
+| 💎 منجم البلّور | تنقب البلّور بالفأس | سبائك البلّور + المصابيح المضيئة | عمالقة الجليد | برج البلّور |
+| 🌲 وادي الحطّابين | تحطب الأشجار | حزم الحطب + الزلاجات | اليتي | الموقد العظيم |
 
-### ✨ ما يميّزها: حرب الثلج
-كل دقيقتين تقريباً **يتجمّد النهر** وتعبر **ذئاب الصقيع** فوق الجليد لسرقة السمك والطعام!
-ترمي أنت والصيادون **كرات الثلج** تلقائياً، وتساعدكم **مدافع الثلج**. كل ذئب تهزمه يعطيك **بلورات صقيع** تُطوّر بها
-قوة الرمي وسرعته وسعة الحمل وسرعة المشي وسرعة المطبخ من **الورشة**.
+- ابنِ المعلم الأخير لتفتح **السفر** إلى المنطقة التالية. تحتفظ بالبلورات والتطويرات والملابس وتحصل على **+25% أرباح دائمة** عن كل منطقة تكملها.
+- بعد المنطقة الثالثة تبدأ الرحلة من جديد بـ **نجمة ★** إضافية: أسعار أكبر وأعداء أقوى — **بلا نهاية**.
+
+### ✨ في كل منطقة
+- **13 عنصراً للفتح**: جامعين (صيادين/منقبين/حطابين)، حمّالين، بائعين، **أمين صندوق** يجمع العملات عنك، مدافع ثلج، ورشة ثانية، والمعلم الأخير.
+- **ترقية المحطات** حتى المستوى 10: المنصة، المطبخين، والكشكين (سرعة + سعة + أسعار أعلى).
+- **حرب الثلج** كل دقيقتين تقريباً، و**هجوم زعيم 👑** كل رابع حرب.
+- **3 مهام** دائماً بجوائز من العملات والبلورات.
+- **الورشة**: 6 تطويرات × 10 مستويات (القوة، السرعة، الحمل، المشي، سرعة العمّال، زيادة الأرباح) + **خزانة ملابس** فيها 6 أزياء للبطل.
+- **أرباح أثناء الغياب**: عمّالك يربحون لك وأنت خارج اللعبة (حتى ساعة).
 
 ### التحكم
-- اسحب بإصبعك في أي مكان على الشاشة لتحريك الشخصية (عصا تحكم عائمة).
-- كل شيء آخر تلقائي: الصيد، الالتقاط، التسليم، الدفع، والقتال.
-- سهم أصفر يرشدك للخطوة التالية في البداية.
-- اللغة: العربية أو الإنجليزية (من الشاشة الرئيسية أو الإعدادات). التقدّم يُحفظ تلقائياً.
+اسحب في أي مكان للتحرك. الصيد والتنقيب والتحطيب والالتقاط والتسليم والدفع والقتال كلها تلقائية.
+للدفع على المربعات قف عليها لحظة (المرور السريع لا يصرف عملاتك). التقدّم يُحفظ تلقائياً، واللغة عربي/إنجليزي.
 
 ---
 
 ## 🇬🇧 English
 
-An **original** idle-arcade game made with **Flutter**, built around the same *catch → process → sell → expand*
-loop as the reference video but with its own identity. All characters, world art and sounds are generated in code.
+An **original** idle-arcade game made with **Flutter** (gather → craft → sell → expand) with its own identity —
+every character, world, drawing and sound is generated in code.
 
-**Loop:** stand on the dock to auto-harpoon fish → carry them to the chef who cooks **fish cakes** (later the cook
-makes **chowder**) → stock the stall for the hungry crowd → collect coins → stand on unlock tiles to hire
-harpooners, porters and waiters, build snow cannons, open the Chowder House and finally light the
-**Aurora Lighthouse** (sale prices ×2).
+### 🗺️ An endless 3-region expedition
+| Region | Gather | Craft & sell | Snow War raiders | Final landmark |
+|---|---|---|---|---|
+| ❄️ Frost Harbor | harpoon fish from the dock | fish cakes + chowder | frost wolves | Aurora Lighthouse |
+| 💎 Crystal Quarry | mine glowing crystals | crystal bars + crystal lamps | ice golems | Crystal Spire |
+| 🌲 Timber Hollow | chop trees | firewood + sleds | yetis | Great Hearth |
 
-**The twist — the Snow War:** every couple of minutes the river freezes and **frost wolves** cross the ice to steal
-your food. You and your harpooners throw snowballs automatically and snow cannons join in. Defeated wolves drop
-**frost crystals**, spent in the **Workshop** on throw power, throw speed, carry capacity, move speed and kitchen speed.
-
-**Controls:** drag anywhere (floating joystick). Desktop/web: arrow keys or WASD. Everything else is automatic.
+Build a region's landmark to unlock **travel**. You keep crystals, workshop upgrades and outfits and earn a
+**permanent +25% income** per completed region. After the third region the expedition loops with an extra **★ star**
+(bigger prices, tougher raiders) — it never ends.
 
 ### Features
-- Pseudo-3D isometric world drawn entirely with `CustomPainter` (no image assets): river, ice floes, forests,
-  palisade, stalls, lighthouse, crowds, particles, snowfall, freezing river, wolves.
-- 12 unlocks, 2 production chains, 5 upgrades × 8 levels, escalating raids with pack leaders.
-- Arabic / English UI with the rounded *Baloo Bhaijaan 2* font, procedural music and sound effects, haptics.
-- Auto-save (shared_preferences), works fully offline.
+- 13 unlocks per region including gatherers, porters, sellers, a **Cashier** that banks coins for you, snow cannons,
+  a second workshop and the landmark.
+- **Station levels** up to Lv10 for the pad, both kitchens and both stalls (speed, capacity, better prices).
+- **Snow War** raids every couple of minutes and a **boss raid 👑** every fourth war.
+- **Quests** (3 at a time) with coin and crystal rewards; **Workshop** with 6 upgrades × 10 levels and a
+  **Wardrobe** of 6 hero outfits; **offline earnings** (up to an hour).
+- Pseudo-3D isometric world drawn with `CustomPainter` (static scenery cached into sprites), Arabic / English UI,
+  procedural music and sound effects, haptics, auto-save (saves from v1 are migrated).
+
+**Controls:** drag anywhere (floating joystick); desktop/web: arrow keys or WASD. Stand on a tile for a moment to pay.
 
 ### Build it yourself
 ```bash
 flutter pub get
-flutter test                 # bot plays 30 simulated minutes and checks the whole progression
+flutter test                 # a bot plays the whole 3-region expedition and checks pacing, saves, bosses...
 flutter build apk --release  # → build/app/outputs/flutter-apk/app-release.apk
 ```
 Every push to `main` also builds the APK on GitHub Actions and publishes it as a release
-(`.github/workflows/build-apk.yml`), so the newest build is always at
-`https://github.com/ahmedalgarbani/White_war/releases/latest/download/white-war.apk`.
+(`.github/workflows/build-apk.yml`): `https://github.com/ahmedalgarbani/White_war/releases/latest/download/white-war.apk`.
 
 ### Project layout
 | Path | What |
 |---|---|
-| `lib/game/world.dart` | Game state & simulation (fish, stations, helpers, customers, raids, economy, save/load) |
+| `lib/game/defs.dart` | Items, regions, looks, outfits, unlock paths, layout |
+| `lib/game/world.dart` | Simulation: gathering, kitchens, helpers, customers, raids & bosses, quests, levels, travel, save/load |
 | `lib/game/render.dart` | Isometric renderer (all drawing) |
-| `lib/game/iso.dart` | Camera / projection |
-| `lib/ui/` | Flutter UI: HUD, title screen, Workshop, settings |
+| `lib/ui/` | HUD, title screen, Workshop & Wardrobe, Quests, Expedition map, settings |
 | `tool/gen_audio.py`, `tool/gen_icon.py` | Generate the sounds/music and the app icon |
 | `test/world_test.dart` | Headless simulation tests |
 

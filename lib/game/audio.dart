@@ -31,6 +31,10 @@ class AudioManager {
     Sfx.poof: 'poof.wav',
     Sfx.snowball: 'snowball.wav',
     Sfx.victory: 'victory.wav',
+    Sfx.chop: 'chop.wav',
+    Sfx.mine: 'mine.wav',
+    Sfx.quest: 'quest.wav',
+    Sfx.boss: 'boss.wav',
   };
 
   static const Map<Sfx, double> _volume = {
@@ -44,6 +48,10 @@ class AudioManager {
     Sfx.poof: 0.6,
     Sfx.snowball: 0.5,
     Sfx.victory: 0.8,
+    Sfx.chop: 0.6,
+    Sfx.mine: 0.5,
+    Sfx.quest: 0.8,
+    Sfx.boss: 0.85,
   };
 
   static const Map<Sfx, int> _gapMs = {
@@ -53,6 +61,8 @@ class AudioManager {
     Sfx.coin: 70,
     Sfx.snowball: 60,
     Sfx.poof: 80,
+    Sfx.chop: 60,
+    Sfx.mine: 60,
   };
 
   Future<void> init() async {
@@ -61,7 +71,7 @@ class AudioManager {
       await AudioPlayer.global.setAudioContext(
           AudioContextConfig(focus: AudioContextConfigFocus.mixWithOthers).build());
       for (final e in _files.entries) {
-        final busy = e.key == Sfx.pop || e.key == Sfx.coin || e.key == Sfx.throwSpear || e.key == Sfx.hit;
+        final busy = e.key == Sfx.pop || e.key == Sfx.coin || e.key == Sfx.throwSpear || e.key == Sfx.hit || e.key == Sfx.chop || e.key == Sfx.mine;
         final list = <AudioPlayer>[];
         for (var i = 0; i < (busy ? 4 : 2); i++) {
           final p = AudioPlayer();

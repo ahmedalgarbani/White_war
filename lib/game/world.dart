@@ -1,145 +1,10 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'defs.dart';
 import 'iso.dart';
 
-// =============================================================================
-// Enums & small helpers
-// =============================================================================
-
-enum Item { fish, goldFish, bigFish, cake, chowder }
-
-enum Cat { fish, cake, chowder }
-
-enum Sfx { throwSpear, hit, pop, coin, unlock, alarm, howl, poof, snowball, victory }
-
-enum Upg { power, rate, capacity, speed, kitchen }
-
-enum TileIcon { harpoon, porter, waiter, cannon, key, lighthouse }
-
-enum ProjKind { harpoon, snowball, cannonball }
-
-enum PK { puff, spark, confetti, steam, splash, ring, ember, heart }
-
-enum PropKind { lantern, crate, barrel, mound, rock, sign }
-
-Cat catOf(Item i) => switch (i) {
-      Item.fish || Item.goldFish || Item.bigFish => Cat.fish,
-      Item.cake => Cat.cake,
-      Item.chowder => Cat.chowder,
-    };
-
-double catH(Cat c) => switch (c) {
-      Cat.fish => 0.21,
-      Cat.cake => 0.11,
-      Cat.chowder => 0.2,
-    };
-
-// World layout ---------------------------------------------------------------
-const double riverX0 = -10.5;
-const double riverX1 = -1.6;
-const double waterZ = -0.45;
-const double dockZ = 0.12;
-const Rect dockRect = Rect.fromLTRB(-4.9, -3.2, -1.2, 2.0);
-const Rect walkA = Rect.fromLTRB(-1.5, -6.7, 10.2, 3.7);
-const Rect walkB = Rect.fromLTRB(-1.5, 3.6, 10.2, 10.7);
-const Rect zoneARect = Rect.fromLTRB(-1.35, -7.0, 10.5, 4.0);
-const Rect zoneBRect = Rect.fromLTRB(-1.35, 4.0, 10.5, 11.0);
-const Offset lighthousePos = Offset(-0.45, -6.1);
-
-const List<int> upgCosts = [2, 4, 6, 9, 13, 18, 24, 32];
-const int upgMax = 8;
-
-// =============================================================================
-// Looks
-// =============================================================================
-
-class Look {
-  final Color coat;
-  final Color coatDark;
-  final Color trim;
-  final Color hat;
-  final Color skin;
-  final Color pants;
-  final int hatKind; // 0 beanie, 1 chef, 2 fur cap, 3 hood
-  final Color? scarf;
-  final bool tool;
-
-  const Look({
-    required this.coat,
-    required this.coatDark,
-    required this.hat,
-    this.trim = const Color(0xFFF7F4EE),
-    this.skin = const Color(0xFFF6CFB0),
-    this.pants = const Color(0xFF34395A),
-    this.hatKind = 0,
-    this.scarf,
-    this.tool = false,
-  });
-}
-
-class Looks {
-  static const player = Look(
-      coat: Color(0xFFE2483D),
-      coatDark: Color(0xFFAE2E28),
-      hat: Color(0xFFE2483D),
-      hatKind: 3,
-      scarf: Color(0xFFFFC93C));
-  static const chef = Look(
-      coat: Color(0xFFF4F6FA),
-      coatDark: Color(0xFFC6CFDD),
-      hat: Color(0xFFFFFFFF),
-      hatKind: 1,
-      pants: Color(0xFF59607A));
-  static const cook = Look(
-      coat: Color(0xFFF3A65A),
-      coatDark: Color(0xFFC97B34),
-      hat: Color(0xFFFFFFFF),
-      hatKind: 1,
-      skin: Color(0xFFC98E66));
-  static const porter = Look(
-      coat: Color(0xFF43A35B),
-      coatDark: Color(0xFF2D7841),
-      hat: Color(0xFFF2C14E),
-      skin: Color(0xFFE8B48F));
-  static const waiter = Look(
-      coat: Color(0xFF7E5BD6),
-      coatDark: Color(0xFF583CA4),
-      hat: Color(0xFFFF8FB1));
-  static const harpooner = Look(
-      coat: Color(0xFF2E5E8E),
-      coatDark: Color(0xFF1E4168),
-      hat: Color(0xFF8A5A3B),
-      hatKind: 2,
-      skin: Color(0xFFE8B48F),
-      tool: true);
-}
-
-const List<Color> coatPalette = [
-  Color(0xFF5DADE2),
-  Color(0xFFF5B041),
-  Color(0xFFAF7AC5),
-  Color(0xFF48C9B0),
-  Color(0xFFEC7063),
-  Color(0xFFF4D03F),
-  Color(0xFF85C1E9),
-  Color(0xFFF1948A),
-  Color(0xFF82E0AA),
-  Color(0xFFBB8FCE),
-  Color(0xFF5D6D7E),
-  Color(0xFFE59866),
-];
-
-const List<Color> skinPalette = [
-  Color(0xFFF6CFB0),
-  Color(0xFFE8B48F),
-  Color(0xFFC98E66),
-  Color(0xFF9C6644),
-  Color(0xFFFFDDC4),
-];
-
-Color darken(Color c, double t) => Color.lerp(c, const Color(0xFF15192B), t)!;
-Color lighten(Color c, double t) => Color.lerp(c, const Color(0xFFFFFFFF), t)!;
+export 'defs.dart';
 
 // =============================================================================
 // Entities
@@ -151,7 +16,7 @@ class Actor {
   double facing;
   double walk = 0;
   double move = 0;
-  final Look look;
+  Look look;
   final List<Item> carry = [];
   final List<Item> inbound = [];
   int capacity;
@@ -167,12 +32,24 @@ class Actor {
     return null;
   }
 
+  Item? get carryRep => carry.isNotEmpty ? carry.first : (inbound.isNotEmpty ? inbound.first : null);
   int get load => carry.length + inbound.length;
   bool get isFull => load >= capacity;
   Offset get dir => Offset(math.cos(facing), math.sin(facing));
   Offset get stackPos => pos + dir * 0.5;
 
-  double stackZ(int i) => 0.55 + i * catH(carryCat ?? Cat.cake);
+  bool carries(Cat c) => carry.any((it) => catOf(it) == c) || inbound.any((it) => catOf(it) == c);
+
+  /// Height above the ground of stack slot [i] (items may have different heights).
+  double stackZ(int i) {
+    var z = 0.55;
+    for (var j = 0; j < i; j++) {
+      final k = j - carry.length;
+      final it = j < carry.length ? carry[j] : (k < inbound.length ? inbound[k] : null);
+      z += it == null ? 0.12 : itemH(it);
+    }
+    return z;
+  }
 
   void faceTo(Offset d) {
     if (d.dx * d.dx + d.dy * d.dy > 1e-8) facing = math.atan2(d.dy, d.dx);
@@ -185,7 +62,25 @@ class Courier extends Actor {
   int state = 0;
   double wait = 0;
 
-  Courier(super.pos, super.look, this.from, this.to) : super(capacity: 6);
+  Courier(super.pos, super.look, this.from, this.to) : super(capacity: 8);
+}
+
+/// Gathers the region's raw resource: harpoons fish from the dock, or walks to
+/// rocks / trees in the field and hits them.
+class Harvester extends Actor {
+  final Offset home;
+  Node? node;
+
+  Harvester(super.pos, super.look)
+      : home = pos,
+        super(facing: math.pi);
+}
+
+class Cashier extends Actor {
+  CashPile? target;
+  double collectCd = 0;
+
+  Cashier(super.pos, super.look);
 }
 
 class Pile {
@@ -193,20 +88,21 @@ class Pile {
   final Rect zone;
   final Offset at;
   final double baseZ;
-  final int capacity;
+  int capacity;
   final Cat cat;
   final int cols;
   final double gap;
+  final Item rep;
   final List<Item> items = [];
   int incoming = 0;
   double bounce = 0;
   double warn = 0;
 
-  Pile(this.id, this.zone, this.at, this.baseZ, this.capacity, this.cat,
-      this.cols, this.gap);
+  Pile(this.id, this.zone, this.at, this.baseZ, this.capacity, this.cat, this.cols, this.gap, this.rep);
 
   bool get isFull => items.length + incoming >= capacity;
   int get space => capacity - items.length - incoming;
+  double get layerH => itemH(rep);
 
   Offset colOffset(int col) {
     if (cols == 1) return Offset.zero;
@@ -215,19 +111,20 @@ class Pile {
   }
 
   Offset slotXY(int i) => at + colOffset(i % cols);
-  double slotZ(int i) => baseZ + (i ~/ cols) * catH(cat);
+  double slotZ(int i) => baseZ + (i ~/ cols) * layerH;
 }
 
 class Processor {
   final String id;
   final Offset pos;
-  final bool isPot;
+  final bool isB;
   final Pile input;
   final Pile output;
   final Actor chef;
   final Offset workAt;
   final double workZ;
   final double baseTime;
+  final Item product;
   Item? working;
   double t = 0;
   double anim = 0;
@@ -237,28 +134,19 @@ class Processor {
   Processor({
     required this.id,
     required this.pos,
-    required this.isPot,
+    required this.isB,
     required this.input,
     required this.output,
     required this.chef,
     required this.workAt,
     required this.workZ,
     required this.baseTime,
+    required this.product,
   });
 
-  Item get product => isPot ? Item.chowder : Item.cake;
-
-  int yieldOf(Item fish) => isPot
-      ? switch (fish) {
-          Item.goldFish => 2,
-          Item.bigFish => 3,
-          _ => 1,
-        }
-      : switch (fish) {
-          Item.goldFish => 6,
-          Item.bigFish => 8,
-          _ => 3,
-        };
+  int yieldOf(Item raw) => isB
+      ? (isRare(raw) ? 2 : (isBig(raw) ? 3 : 1))
+      : (isRare(raw) ? 6 : (isBig(raw) ? 8 : 3));
 }
 
 class Customer extends Actor {
@@ -322,41 +210,29 @@ class Counter {
   });
 }
 
-class UnlockDef {
-  final String id;
-  final Offset pos;
-  final int price;
-  final List<String> req;
-  final String name;
-  final TileIcon icon;
-
-  const UnlockDef(this.id, this.pos, this.price, this.req, this.name, this.icon);
-}
-
-const List<UnlockDef> unlockDefs = [
-  UnlockDef('harp1', Offset(-4.45, -2.6), 40, [], 'harpooner', TileIcon.harpoon),
-  UnlockDef('porter1', Offset(2.3, -0.2), 110, ['harp1'], 'porter', TileIcon.porter),
-  UnlockDef('harp2', Offset(-4.45, -1.25), 180, ['harp1'], 'harpooner', TileIcon.harpoon),
-  UnlockDef('waiter1', Offset(7.0, -3.4), 260, ['porter1'], 'waiter', TileIcon.waiter),
-  UnlockDef('cannon1', Offset(0.3, 3.0), 330, ['harp2'], 'cannon', TileIcon.cannon),
-  UnlockDef('chowder', Offset(4.5, 3.1), 600, ['waiter1'], 'chowderHouse', TileIcon.key),
-  UnlockDef('harp3', Offset(-4.45, 0.1), 650, ['chowder'], 'harpooner', TileIcon.harpoon),
-  UnlockDef('porter2', Offset(2.0, 5.3), 750, ['chowder'], 'porter', TileIcon.porter),
-  UnlockDef('waiter2', Offset(7.0, 9.3), 900, ['porter2'], 'waiter', TileIcon.waiter),
-  UnlockDef('harp4', Offset(-4.45, 1.45), 1100, ['harp3'], 'harpooner', TileIcon.harpoon),
-  UnlockDef('cannon2', Offset(0.3, 9.7), 1300, ['chowder', 'cannon1'], 'cannon', TileIcon.cannon),
-  UnlockDef('lighthouse', Offset(0.75, -5.7), 2400, ['harp4', 'waiter2'], 'lighthouse', TileIcon.lighthouse),
-];
-
 class UnlockTile {
   final UnlockDef def;
+  final int price;
   int paid = 0;
   double appear = 0;
   double glow = 0;
 
-  UnlockTile(this.def);
+  UnlockTile(this.def, this.price);
 
   Rect get zone => Rect.fromCenter(center: def.pos, width: 1.6, height: 1.6);
+}
+
+class LevelTile {
+  final StationKind kind;
+  final Offset pos;
+  int paid = 0;
+  double appear = 0;
+  double glow = 0;
+  double flash = 0;
+
+  LevelTile(this.kind, this.pos);
+
+  Rect get zone => Rect.fromCenter(center: pos, width: 1.25, height: 1.25);
 }
 
 class Fish {
@@ -372,21 +248,38 @@ class Fish {
   double vis;
   bool alive = true;
 
-  Fish(this.pos, this.baseX, this.speed, this.kind, this.hp, this.phase, this.vis)
-      : maxHp = hp;
+  Fish(this.pos, this.baseX, this.speed, this.kind, this.hp, this.phase, this.vis) : maxHp = hp;
 
   bool get doomed => pending >= hp;
 }
 
-class Wolf {
+/// A rock or tree in the field that can be mined / chopped and grows back.
+class Node {
+  final Offset pos;
+  Item kind;
+  int hp;
+  int maxHp;
+  bool alive = true;
+  double regrow = 0;
+  double grow = 1;
+  double shake = 0;
+  double fall = 1;
+  final double fallDir;
+  final double seed;
+
+  Node(this.pos, this.kind, this.hp, this.fallDir, this.seed) : maxHp = hp;
+}
+
+class Enemy {
   Offset pos;
   int hp;
   final int maxHp;
-  final bool leader;
+  final bool boss;
   final double speed;
+  final int steal;
   int state = 0; // 0 = approach, 1 = flee
   Pile? target;
-  Item? stolen;
+  final List<Item> stolen = [];
   Pile? stolenFrom;
   double phase;
   double flash = 0;
@@ -395,7 +288,7 @@ class Wolf {
   bool alive = true;
   double life = 0;
 
-  Wolf(this.pos, this.hp, this.leader, this.speed, this.phase) : maxHp = hp;
+  Enemy(this.pos, this.hp, this.boss, this.speed, this.phase, this.steal) : maxHp = hp;
 }
 
 class Proj {
@@ -433,9 +326,7 @@ class Flight {
   double z;
   bool done = false;
 
-  Flight(this.item, this.from, this.fromZ, this.to, this.toZ, this.dur, this.arc,
-      this.onLand,
-      {this.spin = 0})
+  Flight(this.item, this.from, this.fromZ, this.to, this.toZ, this.dur, this.arc, this.onLand, {this.spin = 0})
       : pos = from,
         z = fromZ;
 }
@@ -451,8 +342,7 @@ class Particle {
   double rot;
   final double vr;
 
-  Particle(this.kind, this.x, this.y, this.z, this.vx, this.vy, this.vz, this.max,
-      this.size, this.color,
+  Particle(this.kind, this.x, this.y, this.z, this.vx, this.vy, this.vz, this.max, this.size, this.color,
       {this.grav = 0, this.rot = 0, this.vr = 0});
 }
 
@@ -528,6 +418,7 @@ class Ob {
 class Raid {
   bool enabled = false;
   bool active = false;
+  bool boss = false;
   double timer = 75;
   int index = 0;
   double freeze = 0;
@@ -539,26 +430,67 @@ class Raid {
   bool howled = false;
 }
 
+class Quest {
+  final QuestKind kind;
+  final int target;
+  final int coins;
+  final int gems;
+  int progress = 0;
+
+  Quest(this.kind, this.target, this.coins, this.gems);
+
+  bool get done => progress >= target;
+
+  Map<String, dynamic> toJson() => {'k': kind.name, 't': target, 'c': coins, 'g': gems, 'p': progress};
+
+  static Quest? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final k = QuestKind.values.where((e) => e.name == j['k']).firstOrNull;
+    if (k == null) return null;
+    int i(Object? v) => v is num ? v.toInt() : 0;
+    return Quest(k, math.max(1, i(j['t'])), i(j['c']), i(j['g']))..progress = i(j['p']);
+  }
+}
+
 // =============================================================================
-// The world
+// The world (one region of the expedition)
 // =============================================================================
 
 class GameWorld {
-  GameWorld() {
+  GameWorld({this.regionIndex = 0, this.star = 0})
+      : region = regions[regionIndex % regions.length],
+        defs = unlocksFor(regions[regionIndex % regions.length]) {
     _build();
   }
+
+  final int regionIndex;
+  final int star;
+  final RegionDef region;
+  final List<UnlockDef> defs;
 
   final math.Random rnd = math.Random();
   final IsoCamera cam = IsoCamera();
   double time = 0;
   double playTime = 0;
   bool started = false;
-  int money = 0;
-  int crystals = 0;
-  int earned = 0;
-  final Map<Upg, int> upg = {for (final u in Upg.values) u: 0};
-  final Set<String> unlocked = <String>{};
   bool dirty = false;
+
+  // ---- meta progression (carried to the next region)
+  int crystals = 0;
+  final Map<Upg, int> upg = {for (final u in Upg.values) u: 0};
+  int completed = 0;
+  int outfit = 0;
+  final Set<int> outfitsOwned = {0};
+  int questLevel = 0;
+  int lifetimeEarned = 0;
+
+  // ---- region state
+  int money = 0;
+  int earned = 0;
+  int regionQuests = 0;
+  final Set<String> unlocked = <String>{};
+  final Map<StationKind, int> slv = {for (final k in StationKind.values) k: 0};
+  final List<Quest> quests = [];
 
   late final Actor player;
   Offset input = Offset.zero;
@@ -568,12 +500,14 @@ class GameWorld {
   double _throwCd = 0;
   double _fishCd = 0;
   double _coinFxCd = 0;
+  double _tileDwell = 0;
 
-  late final Pile fishPad;
-  late final Processor grill;
+  late final Pile rawPad;
+  late final Processor procA;
   late final Counter standA;
-  Processor? pot;
+  Processor? procB;
   Counter? standB;
+  Cashier? cashier;
 
   final List<Pile> piles = [];
   final List<Pile> pickPiles = [];
@@ -581,25 +515,27 @@ class GameWorld {
   final List<CashPile> cashPiles = [];
   final List<Processor> processors = [];
   final List<Counter> counters = [];
-  final List<Actor> harpooners = [];
+  final List<Harvester> harvesters = [];
   final List<Courier> couriers = [];
   final List<Cannon> cannons = [];
   final List<Fish> fish = [];
+  final List<Node> nodes = [];
   final List<Proj> projs = [];
   final List<Flight> flights = [];
-  final List<Wolf> wolves = [];
+  final List<Enemy> enemies = [];
   final List<Particle> parts = [];
   final List<FloatText> texts = [];
   final List<HudFly> hudFlies = [];
   final List<UnlockTile> tiles = [];
+  final List<LevelTile> levelTiles = [];
   final List<Tree> trees = [];
   final List<Prop> props = [];
   final List<Offset> fencePosts = [];
   final List<Ob> obstacles = [];
   final Raid raid = Raid();
   bool zoneB = false;
-  bool lighthouse = false;
-  double lighthouseT = 0;
+  bool landmark = false;
+  double landmarkT = 0;
   final List<Sfx> sfx = [];
   final List<String> events = [];
   double shake = 0;
@@ -608,23 +544,47 @@ class GameWorld {
 
   double rr(double a, double b) => a + rnd.nextDouble() * (b - a);
 
-  // ---------------------------------------------------------------- stats
+  bool get isRiver => region.source == SourceKind.river;
+
+  /// Multiplier for sale prices in this region of the expedition.
+  double get mul => math.pow(6, regionIndex + 3 * star).toDouble();
+
+  /// Costs grow a little faster than prices, so permanent bonuses and
+  /// workshop upgrades don't make later regions trivial.
+  double get costMul => mul * (1 + 1.0 * regionIndex) * (1 + 0.5 * star);
+
+  // ------------------------------------------------------------------ stats
   int lv(Upg u) => upg[u] ?? 0;
-  double get playerSpeed => 4.4 * (1 + 0.08 * lv(Upg.speed));
-  double get playerRate => 0.6 * math.pow(0.9, lv(Upg.rate)).toDouble();
+  int sl(StationKind k) => slv[k] ?? 0;
+  double get playerSpeed => 4.4 * (1 + 0.07 * lv(Upg.speed));
+  double get playerRate => 0.6 * math.pow(0.92, lv(Upg.rate)).toDouble();
   int get playerDmg => 1 + lv(Upg.power);
-  int get harpoonerDmg => 1 + lv(Upg.power) ~/ 2;
-  double get harpoonerRate => 1.2 * math.pow(0.9, lv(Upg.rate)).toDouble();
-  int get cannonDmg => 3 + lv(Upg.power);
+  int get harvesterDmg => 1 + lv(Upg.power) ~/ 2;
+  double get harvesterRate => 1.2 * math.pow(0.9, lv(Upg.helpers)).toDouble();
+  int get cannonDmg => (3 + lv(Upg.power)) * (1 + regionIndex);
   int get playerCap => 8 + 3 * lv(Upg.capacity);
   int get courierCap => 8 + lv(Upg.capacity);
-  double get courierSpeed => 2.8 * (1 + 0.06 * lv(Upg.speed));
-  double get kitchenMul => math.pow(0.88, lv(Upg.kitchen)).toDouble();
-  double get buyInterval => 0.22 * math.pow(0.92, lv(Upg.kitchen)).toDouble();
-  int priceOf(Item it) => (it == Item.chowder ? 16 : 4) * (lighthouse ? 2 : 1);
+  double get courierSpeed => 2.8 * (1 + 0.07 * lv(Upg.helpers));
+  double get incomeBonus =>
+      (1 + 0.25 * completed) * (1 + 0.06 * lv(Upg.income)) * (landmark ? 2 : 1);
+  bool get canHarvest => raid.freeze < 0.05;
   int get progress => unlocked.length;
-  int get progressMax => unlockDefs.length;
-  bool get canFish => raid.freeze < 0.05;
+  int get progressMax => defs.length;
+  bool get regionComplete => landmark;
+
+  int priceOf(Item it) {
+    final b = catOf(it) == Cat.prodB;
+    final lvl = sl(b ? StationKind.standB : StationKind.standA);
+    final v = (b ? 16 : 4) * mul * incomeBonus * (1 + 0.12 * lvl);
+    return math.max(1, v.round());
+  }
+
+  int levelPrice(StationKind k) => (levelBaseCost[k]! * math.pow(1.6, sl(k)) * costMul).round();
+
+  bool stationExists(StationKind k) => switch (k) {
+        StationKind.procB || StationKind.standB => zoneB,
+        _ => true,
+      };
 
   int upgCost(Upg u) => lv(u) >= upgMax ? -1 : upgCosts[lv(u)];
 
@@ -639,6 +599,26 @@ class GameWorld {
     return true;
   }
 
+  bool buyOutfit(int i) {
+    if (i < 0 || i >= outfits.length) return false;
+    if (outfitsOwned.contains(i)) {
+      wearOutfit(i);
+      return true;
+    }
+    if (crystals < outfits[i].cost) return false;
+    crystals -= outfits[i].cost;
+    outfitsOwned.add(i);
+    wearOutfit(i);
+    sfx.add(Sfx.unlock);
+    return true;
+  }
+
+  void wearOutfit(int i) {
+    outfit = i;
+    player.look = outfits[i].look;
+    dirty = true;
+  }
+
   void _applyUpgrades() {
     player.capacity = playerCap;
     for (final c in couriers) {
@@ -646,30 +626,41 @@ class GameWorld {
     }
   }
 
-  bool tileVisible(UnlockTile t) =>
-      !unlocked.contains(t.def.id) && t.def.req.every(unlocked.contains);
+  void _applyLevels() {
+    rawPad.capacity = 20 + 6 * sl(StationKind.pad);
+    procA.output.capacity = 40 + 4 * sl(StationKind.procA);
+    standA.stock.capacity = 32 + 4 * sl(StationKind.standA);
+    procB?.output.capacity = 24 + 4 * sl(StationKind.procB);
+    standB?.stock.capacity = 24 + 4 * sl(StationKind.standB);
+  }
 
-  // ---------------------------------------------------------------- build
+  bool tileVisible(UnlockTile t) => !unlocked.contains(t.def.id) && t.def.req.every(unlocked.contains);
+
+  bool levelTileVisible(LevelTile t) =>
+      started && unlocked.contains('h1') && stationExists(t.kind) && sl(t.kind) < stationMaxLevel - 1;
+
+  // ------------------------------------------------------------------ build
   void _build() {
-    player = Actor(const Offset(0.4, -1.0), Looks.player, facing: 2.3, capacity: 8);
-    fishPad = Pile('fishPad', Rect.fromCenter(center: const Offset(0.7, -3.7), width: 1.9, height: 1.9),
-        const Offset(0.7, -3.7), 0.03, 20, Cat.fish, 2, 0.3);
-    final gIn = Pile('grillIn', Rect.fromCenter(center: const Offset(4.0, -3.6), width: 1.5, height: 1.2),
-        const Offset(4.0, -2.15), 0.81, 8, Cat.fish, 1, 0);
-    final gOut = Pile('grillOut', Rect.fromCenter(center: const Offset(5.45, -1.0), width: 1.4, height: 1.6),
-        const Offset(5.45, -1.0), 0.03, 40, Cat.cake, 4, 0.27);
-    grill = Processor(
-        id: 'grill',
+    player = Actor(const Offset(0.4, -1.0), outfits[0].look, facing: 2.3, capacity: 8);
+    rawPad = Pile('rawPad', Rect.fromCenter(center: const Offset(0.7, -3.7), width: 1.9, height: 1.9),
+        const Offset(0.7, -3.7), 0.03, 20, Cat.raw, 2, 0.3, region.raw);
+    final aIn = Pile('procAIn', Rect.fromCenter(center: const Offset(4.0, -3.6), width: 1.5, height: 1.2),
+        const Offset(4.0, -2.15), 0.81, 8, Cat.raw, 1, 0, region.raw);
+    final aOut = Pile('procAOut', Rect.fromCenter(center: const Offset(5.45, -1.0), width: 1.4, height: 1.6),
+        const Offset(5.45, -1.0), 0.03, 40, Cat.prodA, 4, 0.27, region.prodA);
+    procA = Processor(
+        id: 'procA',
         pos: const Offset(4.0, -1.6),
-        isPot: false,
-        input: gIn,
-        output: gOut,
-        chef: Actor(const Offset(3.0, -1.6), Looks.chef, facing: 0),
+        isB: false,
+        input: aIn,
+        output: aOut,
+        chef: Actor(const Offset(3.0, -1.6), region.chefA, facing: 0),
         workAt: const Offset(4.0, -1.12),
         workZ: 0.87,
-        baseTime: 1.3);
+        baseTime: 1.3,
+        product: region.prodA);
     final sA = Pile('standA', Rect.fromCenter(center: const Offset(4.6, -5.85), width: 1.7, height: 1.3),
-        const Offset(4.6, -7.0), 0.92, 32, Cat.cake, 4, 0.27);
+        const Offset(4.6, -7.0), 0.92, 32, Cat.prodA, 4, 0.27, region.prodA);
     final cashA = CashPile('cashA', Rect.fromCenter(center: const Offset(7.1, -5.7), width: 1.5, height: 1.5),
         const Offset(7.1, -5.7));
     standA = Counter(
@@ -679,51 +670,72 @@ class GameWorld {
         hy: 0.4,
         stock: sA,
         cash: cashA,
-        product: Item.cake,
+        product: region.prodA,
         slots: const [Offset(4.6, -8.1), Offset(4.6, -9.1), Offset(4.6, -10.1), Offset(4.6, -11.1)],
         entry: const Offset(4.6, -14.5),
         crowdArea: const Rect.fromLTRB(-0.6, -15.5, 10.4, -8.3),
         lane: const Rect.fromLTRB(3.75, -16, 5.45, -7),
-        canopy: const Color(0xFFE5484D));
-    piles.addAll([fishPad, gIn, gOut, sA]);
-    pickPiles.addAll([fishPad, gOut]);
-    dropPiles.addAll([gIn, sA]);
+        canopy: region.canopyA);
+    piles.addAll([rawPad, aIn, aOut, sA]);
+    pickPiles.addAll([rawPad, aOut]);
+    dropPiles.addAll([aIn, sA]);
     cashPiles.add(cashA);
-    processors.add(grill);
+    processors.add(procA);
     counters.add(standA);
     _fillCrowd(standA, 46);
-    for (final d in unlockDefs) {
-      tiles.add(UnlockTile(d));
+    for (final d in defs) {
+      tiles.add(UnlockTile(d, (d.price * costMul).round()));
+    }
+    for (final k in StationKind.values) {
+      levelTiles.add(LevelTile(k, levelTileSpots[k]!));
     }
     _buildScenery();
     _rebuildFences();
     _rebuildObstacles();
-    for (var i = 0; i < 18; i++) {
-      _spawnFish(rr(-18, 16), 1);
+    if (isRiver) {
+      for (var i = 0; i < 18; i++) {
+        _spawnFish(rr(-18, 16), 1);
+      }
+    } else {
+      final r = math.Random(regionIndex * 97 + 5);
+      for (final p in nodeSpots) {
+        final k = _rollNodeKind();
+        nodes.add(Node(p + Offset((r.nextDouble() - 0.5) * 0.3, (r.nextDouble() - 0.5) * 0.3), k, _nodeHp(k),
+            r.nextDouble() < 0.5 ? -1 : 1, r.nextDouble()));
+      }
     }
+    _ensureQuests();
     cam.cx = player.pos.dx;
     cam.cy = player.pos.dy;
   }
 
+  Item _rollNodeKind() {
+    final roll = rnd.nextDouble();
+    return roll < 0.08 ? region.rare : (roll < 0.14 ? region.big : region.raw);
+  }
+
+  int _nodeHp(Item k) => isRare(k) ? region.nodeHp - 1 : (isBig(k) ? region.nodeHp * 2 + 1 : region.nodeHp);
+
   void _openZoneB() {
     if (zoneB) return;
     zoneB = true;
-    final pIn = Pile('potIn', Rect.fromCenter(center: const Offset(4.95, 6.45), width: 1.5, height: 1.4),
-        const Offset(3.45, 6.25), 0.47, 8, Cat.fish, 1, 0);
-    final pOut = Pile('potOut', Rect.fromCenter(center: const Offset(4.95, 8.75), width: 1.5, height: 1.5),
-        const Offset(4.95, 8.75), 0.03, 24, Cat.chowder, 4, 0.28);
-    pot = Processor(
-        id: 'pot',
+    final bIn = Pile('procBIn', Rect.fromCenter(center: const Offset(4.95, 6.45), width: 1.5, height: 1.4),
+        const Offset(3.45, 6.25), 0.47, 8, Cat.raw, 1, 0, region.raw);
+    final bOut = Pile('procBOut', Rect.fromCenter(center: const Offset(4.95, 8.75), width: 1.5, height: 1.5),
+        const Offset(4.95, 8.75), 0.03, 24, Cat.prodB, 4, 0.28, region.prodB);
+    procB = Processor(
+        id: 'procB',
         pos: const Offset(3.4, 7.7),
-        isPot: true,
-        input: pIn,
-        output: pOut,
-        chef: Actor(const Offset(2.2, 7.45), Looks.cook, facing: 0),
+        isB: true,
+        input: bIn,
+        output: bOut,
+        chef: Actor(const Offset(2.2, 7.45), region.chefB, facing: 0),
         workAt: const Offset(3.4, 7.7),
         workZ: 1.05,
-        baseTime: 2.4);
+        baseTime: 2.4,
+        product: region.prodB);
     final sB = Pile('standB', Rect.fromCenter(center: const Offset(9.25, 7.4), width: 1.3, height: 1.7),
-        const Offset(10.5, 7.4), 0.92, 24, Cat.chowder, 4, 0.27);
+        const Offset(10.5, 7.4), 0.92, 24, Cat.prodB, 4, 0.27, region.prodB);
     final cashB = CashPile('cashB', Rect.fromCenter(center: const Offset(8.9, 9.7), width: 1.5, height: 1.5),
         const Offset(8.9, 9.7));
     standB = Counter(
@@ -733,41 +745,35 @@ class GameWorld {
         hy: 1.15,
         stock: sB,
         cash: cashB,
-        product: Item.chowder,
+        product: region.prodB,
         slots: const [Offset(11.6, 7.4), Offset(12.6, 7.4), Offset(13.6, 7.4), Offset(14.6, 7.4)],
         entry: const Offset(17.6, 7.4),
         crowdArea: const Rect.fromLTRB(11.3, 3.2, 17.8, 11.8),
         lane: const Rect.fromLTRB(10.5, 6.65, 19, 8.15),
-        canopy: const Color(0xFF3D8BEA));
-    piles.addAll([pIn, pOut, sB]);
-    pickPiles.add(pOut);
-    dropPiles.addAll([pIn, sB]);
+        canopy: region.canopyB);
+    piles.addAll([bIn, bOut, sB]);
+    pickPiles.add(bOut);
+    dropPiles.addAll([bIn, sB]);
     cashPiles.add(cashB);
-    processors.add(pot!);
+    processors.add(procB!);
     counters.add(standB!);
     _fillCrowd(standB!, 30);
     trees.removeWhere((t) => t.inZoneB);
     props.removeWhere((p) => p.inZoneB);
+    _applyLevels();
     _rebuildFences();
     _rebuildObstacles();
   }
 
   void _fillCrowd(Counter k, int n) {
-    final r = math.Random(k.id.hashCode);
+    final r = math.Random(k.id.hashCode + regionIndex * 31);
     var tries = 0;
     while (k.crowd.length < n && tries < n * 40) {
       tries++;
       final p = Offset(k.crowdArea.left + r.nextDouble() * k.crowdArea.width,
           k.crowdArea.top + r.nextDouble() * k.crowdArea.height);
       if (k.lane.inflate(0.25).contains(p)) continue;
-      var ok = true;
-      for (final o in k.crowd) {
-        if ((o.pos - p).distanceSquared < 0.62) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) continue;
+      if (k.crowd.any((o) => (o.pos - p).distanceSquared < 0.62)) continue;
       final c = Customer(p, _randomLook(r), 0, r.nextDouble() * 6.28);
       c.faceTo(k.pos - p);
       k.crowd.add(c);
@@ -776,8 +782,9 @@ class GameWorld {
 
   Look _randomLook([math.Random? r]) {
     final g = r ?? rnd;
-    final coat = coatPalette[g.nextInt(coatPalette.length)];
-    final hat = coatPalette[g.nextInt(coatPalette.length)];
+    final pal = region.coats;
+    final coat = pal[g.nextInt(pal.length)];
+    final hat = pal[g.nextInt(pal.length)];
     return Look(
       coat: coat,
       coatDark: darken(coat, 0.22),
@@ -797,12 +804,19 @@ class GameWorld {
   }
 
   void _buildScenery() {
-    final r = math.Random(1337);
-    // forest on the far bank
+    final r = math.Random(1337 + regionIndex);
+    final quarry = region.source == SourceKind.quarry;
+    // the far side of the river / field
     for (var x = -11.9; x > -23; x -= 1.25) {
       for (var y = -36.0; y < 36; y += 1.35) {
-        trees.add(Tree(Offset(x + (r.nextDouble() - 0.5) * 0.8, y + (r.nextDouble() - 0.5) * 0.9),
-            0.85 + r.nextDouble() * 0.45, r.nextDouble(), false));
+        final p = Offset(x + (r.nextDouble() - 0.5) * 0.8, y + (r.nextDouble() - 0.5) * 0.9);
+        if (quarry && r.nextDouble() < 0.7) {
+          if (r.nextDouble() < 0.55) {
+            props.add(Prop(r.nextDouble() < 0.8 ? PropKind.boulder : PropKind.crystals, p, size: 0.9 + r.nextDouble() * 0.9));
+          }
+          continue;
+        }
+        trees.add(Tree(p, 0.85 + r.nextDouble() * 0.45, r.nextDouble(), false));
       }
     }
     // around the camp
@@ -812,36 +826,55 @@ class GameWorld {
       if (_reservedForScenery(p)) continue;
       if (placed.any((o) => (o - p).distanceSquared < 1.7)) continue;
       placed.add(p);
-      trees.add(Tree(p, 0.8 + r.nextDouble() * 0.5, r.nextDouble(), false));
+      if (quarry && r.nextDouble() < 0.45) {
+        props.add(Prop(PropKind.boulder, p, size: 0.8 + r.nextDouble() * 0.7));
+      } else {
+        trees.add(Tree(p, 0.8 + r.nextDouble() * 0.5, r.nextDouble(), false));
+      }
     }
-    // the locked chowder plot is overgrown until it is bought
+    // the locked plot is overgrown until it is bought
     final zb = <Offset>[];
     for (var i = 0; i < 200 && zb.length < 12; i++) {
       final p = Offset(0.4 + r.nextDouble() * 9.4, 4.9 + r.nextDouble() * 5.5);
       if (zb.any((o) => (o - p).distanceSquared < 2.2)) continue;
       zb.add(p);
-      trees.add(Tree(p, 0.75 + r.nextDouble() * 0.4, r.nextDouble(), true));
+      if (quarry) {
+        props.add(Prop(PropKind.boulder, p, size: 0.8 + r.nextDouble() * 0.6, inZoneB: true));
+      } else {
+        trees.add(Tree(p, 0.75 + r.nextDouble() * 0.4, r.nextDouble(), true));
+      }
     }
-    // props
     props.addAll([
       Prop(PropKind.lantern, const Offset(-1.15, -6.75)),
       Prop(PropKind.lantern, const Offset(10.25, -6.75)),
       Prop(PropKind.lantern, const Offset(-1.15, 2.3)),
       Prop(PropKind.lantern, const Offset(6.35, -1.5)),
-      Prop(PropKind.barrel, const Offset(-1.0, -4.9)),
       Prop(PropKind.crate, const Offset(9.6, -0.9)),
       Prop(PropKind.crate, const Offset(9.75, 0.15), size: 0.8),
-      Prop(PropKind.barrel, const Offset(9.7, 2.6)),
       Prop(PropKind.sign, const Offset(5.9, 3.7)),
       Prop(PropKind.mound, const Offset(2.5, 8.6), inZoneB: true, size: 1.4),
-      Prop(PropKind.rock, const Offset(6.8, 6.2), inZoneB: true),
       Prop(PropKind.mound, const Offset(8.0, 9.9), inZoneB: true, size: 1.1),
     ]);
+    switch (region.source) {
+      case SourceKind.river:
+        props.addAll([Prop(PropKind.barrel, const Offset(-1.0, -4.9)), Prop(PropKind.barrel, const Offset(9.7, 2.6))]);
+      case SourceKind.quarry:
+        props.addAll([
+          Prop(PropKind.cart, const Offset(-0.9, -4.9)),
+          Prop(PropKind.crystals, const Offset(9.7, 2.6), size: 0.8),
+          Prop(PropKind.crystals, const Offset(-10.6, -6.6), size: 1.2),
+        ]);
+      case SourceKind.grove:
+        props.addAll([
+          Prop(PropKind.logpile, const Offset(-0.9, -4.9)),
+          Prop(PropKind.stump, const Offset(9.7, 2.6)),
+          Prop(PropKind.logpile, const Offset(-10.4, 4.6)),
+        ]);
+    }
     for (var i = 0; i < 40; i++) {
       final p = Offset(-1.5 + r.nextDouble() * 26, -28 + r.nextDouble() * 56);
       if (_reservedForScenery(p)) continue;
-      props.add(Prop(r.nextDouble() < 0.6 ? PropKind.mound : PropKind.rock, p,
-          size: 0.7 + r.nextDouble() * 0.9));
+      props.add(Prop(r.nextDouble() < 0.6 ? PropKind.mound : PropKind.rock, p, size: 0.7 + r.nextDouble() * 0.9));
     }
   }
 
@@ -885,10 +918,10 @@ class GameWorld {
     for (final c in cannons) {
       obstacles.add(Ob.circle(c.pos, 0.72));
     }
-    if (lighthouse) obstacles.add(const Ob.circle(lighthousePos, 0.95));
+    if (landmark) obstacles.add(const Ob.circle(landmarkPos, 0.95));
   }
 
-  // ---------------------------------------------------------------- loop
+  // ------------------------------------------------------------------ loop
   void update(double dt) {
     time += dt;
     if (started) {
@@ -898,12 +931,17 @@ class GameWorld {
       _updateInteractions(dt);
       _updateTiles(dt);
       _updateRaid(dt);
+      _updateCashier(dt);
     } else {
       cam.cx = 1.6 + math.sin(time * 0.12) * 2.4;
       cam.cy = -2.2 + math.cos(time * 0.09) * 2.0;
     }
     _updateCamera(dt);
-    _updateFish(dt);
+    if (isRiver) {
+      _updateFish(dt);
+    } else {
+      _updateNodes(dt);
+    }
     _updateProjs(dt);
     _updateFlights(dt);
     for (final p in processors) {
@@ -915,7 +953,7 @@ class GameWorld {
     for (final k in counters) {
       _updateCounter(k, dt);
     }
-    _updateWolves(dt);
+    _updateEnemies(dt);
     _updateCannons(dt);
     _updateFx(dt);
   }
@@ -937,10 +975,16 @@ class GameWorld {
   }
 
   bool _walkable(Offset p) {
-    final inside = dockRect.contains(p) || walkA.contains(p) || (zoneB && walkB.contains(p));
+    final left = isRiver ? dockRect.contains(p) : fieldRect.contains(p);
+    final inside = left || walkA.contains(p) || (zoneB && walkB.contains(p));
     if (!inside) return false;
     for (final o in obstacles) {
       if (o.hit(p)) return false;
+    }
+    if (!isRiver && p.dx < -1.0) {
+      for (final n in nodes) {
+        if (n.alive && (n.pos - p).distanceSquared < 0.2) return false;
+      }
     }
     return true;
   }
@@ -973,7 +1017,7 @@ class GameWorld {
     return best;
   }
 
-  double groundZ(Offset p) => dockRect.contains(p) && !walkA.contains(p) ? dockZ : 0;
+  double groundZ(Offset p) => isRiver && dockRect.contains(p) && !walkA.contains(p) ? dockZ : 0;
 
   void _updatePlayer(double dt) {
     final p = player;
@@ -994,7 +1038,7 @@ class GameWorld {
     p.action = math.max(0, p.action - dt * 4);
   }
 
-  // ---------------------------------------------------------------- combat
+  // ------------------------------------------------------------------ harvesting
   int get _doomedFish {
     var n = 0;
     for (final f in fish) {
@@ -1003,8 +1047,7 @@ class GameWorld {
     return n;
   }
 
-  bool get _padHasRoom =>
-      fishPad.items.length + fishPad.incoming + _doomedFish < fishPad.capacity;
+  bool get padHasRoom => rawPad.items.length + rawPad.incoming + _doomedFish < rawPad.capacity;
 
   Fish? _nearestFish(Offset from, double range) {
     Fish? best;
@@ -1020,10 +1063,25 @@ class GameWorld {
     return best;
   }
 
-  Wolf? _nearestWolf(Offset from, double range) {
-    Wolf? best;
+  Node? nearestNode(Offset from, double range, {Harvester? exclude}) {
+    Node? best;
     var bd = range * range;
-    for (final w in wolves) {
+    for (final n in nodes) {
+      if (!n.alive || n.grow < 0.95) continue;
+      if (exclude != null && harvesters.any((h) => !identical(h, exclude) && identical(h.node, n))) continue;
+      final d = (n.pos - from).distanceSquared;
+      if (d < bd) {
+        bd = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+
+  Enemy? _nearestEnemy(Offset from, double range) {
+    Enemy? best;
+    var bd = range * range;
+    for (final w in enemies) {
       if (!w.alive || w.pending >= w.hp) continue;
       final d = (w.pos - from).distanceSquared;
       if (d < bd) {
@@ -1040,7 +1098,7 @@ class GameWorld {
       target.pending += dmg;
       tp = target.pos;
     } else {
-      final w = target as Wolf;
+      final w = target as Enemy;
       w.pending += dmg;
       tp = w.pos;
     }
@@ -1054,54 +1112,171 @@ class GameWorld {
     _throwCd -= dt;
     final pz = groundZ(player.pos);
     if (_throwCd <= 0) {
-      final w = _nearestWolf(player.pos, 6.8);
+      final w = _nearestEnemy(player.pos, 6.8);
       if (w != null) {
         _launch(ProjKind.snowball, player.pos, pz + 1.3, w, playerDmg);
         if (player.move < 0.2) player.faceTo(w.pos - player.pos);
         player.action = 1;
         _throwCd = playerRate;
-      } else if (dockRect.contains(player.pos) && canFish && _padHasRoom) {
-        final f = _nearestFish(player.pos, 7.8);
-        if (f != null) {
-          _launch(ProjKind.harpoon, player.pos, pz + 1.3, f, playerDmg);
-          if (player.move < 0.2) player.faceTo(f.pos - player.pos);
-          player.action = 1;
-          _throwCd = playerRate;
+      } else if (canHarvest && padHasRoom) {
+        if (isRiver) {
+          if (dockRect.contains(player.pos)) {
+            final f = _nearestFish(player.pos, 7.8);
+            if (f != null) {
+              _launch(ProjKind.harpoon, player.pos, pz + 1.3, f, playerDmg);
+              if (player.move < 0.2) player.faceTo(f.pos - player.pos);
+              player.action = 1;
+              _throwCd = playerRate;
+            }
+          }
+        } else {
+          final n = nearestNode(player.pos, 1.75);
+          if (n != null) {
+            if (player.move < 0.2) player.faceTo(n.pos - player.pos);
+            player.action = 1;
+            _strikeNode(n, playerDmg);
+            _throwCd = playerRate;
+          }
         }
       }
     }
-    for (final h in harpooners) {
-      h.cd -= dt;
+    for (final h in harvesters) {
       h.action = math.max(0, h.action - dt * 4);
       if (h.pop < 1) h.pop = math.min(1, h.pop + dt * 2.5);
-      if (h.cd > 0) continue;
-      final w = _nearestWolf(h.pos, 7.5);
-      if (w != null) {
-        _launch(ProjKind.snowball, h.pos, dockZ + 1.3, w, harpoonerDmg);
-        h.faceTo(w.pos - h.pos);
-        h.action = 1;
-        h.cd = harpoonerRate;
-        continue;
+      if (isRiver) {
+        _riverHarvester(h, dt);
+      } else {
+        _fieldHarvester(h, dt);
       }
-      if (canFish && _padHasRoom) {
-        final f = _nearestFish(h.pos, 8.2);
-        if (f != null) {
-          _launch(ProjKind.harpoon, h.pos, dockZ + 1.3, f, harpoonerDmg);
-          h.faceTo(f.pos - h.pos);
-          h.action = 1;
-          h.cd = harpoonerRate;
-          continue;
-        }
-      }
-      h.cd = 0.2;
     }
   }
 
+  void _riverHarvester(Harvester h, double dt) {
+    h.cd -= dt;
+    if (h.cd > 0) return;
+    final w = _nearestEnemy(h.pos, 7.5);
+    if (w != null) {
+      _launch(ProjKind.snowball, h.pos, dockZ + 1.3, w, harvesterDmg);
+      h.faceTo(w.pos - h.pos);
+      h.action = 1;
+      h.cd = harvesterRate;
+      return;
+    }
+    if (canHarvest && padHasRoom) {
+      final f = _nearestFish(h.pos, 8.2);
+      if (f != null) {
+        _launch(ProjKind.harpoon, h.pos, dockZ + 1.3, f, harvesterDmg);
+        h.faceTo(f.pos - h.pos);
+        h.action = 1;
+        h.cd = harvesterRate;
+        return;
+      }
+    }
+    h.cd = 0.2;
+  }
+
+  void _fieldHarvester(Harvester h, double dt) {
+    h.cd -= dt;
+    final speed = courierSpeed * 0.9;
+    final w = _nearestEnemy(h.pos, 7.0);
+    if (w != null) {
+      h.move = math.max(0, h.move - dt * 8);
+      if (h.cd <= 0) {
+        _launch(ProjKind.snowball, h.pos, 1.3, w, harvesterDmg);
+        h.faceTo(w.pos - h.pos);
+        h.action = 1;
+        h.cd = harvesterRate;
+      }
+      return;
+    }
+    if (!canHarvest || !padHasRoom) {
+      h.node = null;
+      _walkTo(h, h.home, speed, dt);
+      return;
+    }
+    final cur = h.node;
+    if (cur == null || !cur.alive) h.node = nearestNode(h.home, 3.6, exclude: h);
+    final n = h.node;
+    if (n == null) {
+      _walkTo(h, h.home, speed, dt);
+      return;
+    }
+    var d = h.home - n.pos;
+    if (d.distance < 0.1) d = const Offset(1, 0);
+    final stand = n.pos + d / d.distance * 0.85;
+    if (!_walkTo(h, stand, speed, dt)) return;
+    h.faceTo(n.pos - h.pos);
+    if (h.cd <= 0) {
+      h.action = 1;
+      h.cd = harvesterRate;
+      _strikeNode(n, harvesterDmg);
+    }
+  }
+
+  void _strikeNode(Node n, int dmg) {
+    if (!n.alive) return;
+    n.hp -= dmg;
+    n.shake = 1;
+    final quarry = region.source == SourceKind.quarry;
+    _burst(PK.chip, n.pos, 0.6, 6, quarry ? const Color(0xFFA8E6FF) : const Color(0xFFB07A4A),
+        speed: 2.2, up: 3.2, size: 0.07, life: 0.6);
+    sfx.add(quarry ? Sfx.mine : Sfx.chop);
+    if (n.hp <= 0) _breakNode(n);
+  }
+
+  void _breakNode(Node n) {
+    n.alive = false;
+    n.regrow = 0;
+    n.fall = 0;
+    final it = n.kind;
+    _burst(PK.puff, n.pos, 0.4, 8, const Color(0xFFFFFFFF), speed: 1.8, up: 1.4, size: 0.22);
+    if (rawPad.isFull) return;
+    final slot = rawPad.items.length + rawPad.incoming;
+    rawPad.incoming++;
+    flights.add(Flight(it, n.pos, 0.6, () => rawPad.slotXY(slot), () => rawPad.slotZ(slot), 0.7, 3.0, () {
+      rawPad.incoming--;
+      rawPad.items.add(it);
+      rawPad.bounce = 1;
+      sfx.add(Sfx.pop);
+      _questEvent(QuestKind.harvest, 1);
+    }, spin: 1));
+    _rareBonus(it, n.pos);
+  }
+
+  void _rareBonus(Item it, Offset at) {
+    if (!isRare(it) && !isBig(it)) return;
+    if (isBig(it) && rnd.nextBool()) return;
+    const n = 1;
+    _gainGems(n, at, 0.6);
+    texts.add(FloatText(at, 1.4, '+$n', const Color(0xFF7FE7FF)));
+    if (isRare(it)) _questEvent(QuestKind.rare, 1);
+  }
+
+  void _updateNodes(double dt) {
+    for (final n in nodes) {
+      n.shake = math.max(0, n.shake - dt * 6);
+      if (!n.alive) {
+        n.fall = math.min(1, n.fall + dt * 1.8);
+        n.regrow += dt;
+        if (n.regrow >= region.regrow) {
+          n.kind = _rollNodeKind();
+          n.maxHp = _nodeHp(n.kind);
+          n.hp = n.maxHp;
+          n.alive = true;
+          n.grow = 0;
+        }
+      } else if (n.grow < 1) {
+        n.grow = math.min(1, n.grow + dt * 1.6);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ projectiles
   void _updateProjs(double dt) {
     for (final p in projs) {
       p.t += dt;
       final t = p.target;
-      final tp = t is Fish ? t.pos : (t as Wolf).pos;
+      final tp = t is Fish ? t.pos : (t as Enemy).pos;
       final tz = t is Fish ? waterZ + 0.15 : 0.6;
       final u = math.min(1.0, p.t / p.dur);
       final np = Offset.lerp(p.from, tp, u)!;
@@ -1134,60 +1309,62 @@ class GameWorld {
       t.flash = 1;
       sfx.add(Sfx.hit);
       if (t.hp <= 0) _catchFish(t);
-    } else if (t is Wolf) {
+    } else if (t is Enemy) {
       t.pending = math.max(0, t.pending - p.dmg);
       final big = p.kind == ProjKind.cannonball;
-      _burst(PK.puff, t.pos, 0.6, big ? 12 : 6, const Color(0xFFFFFFFF), speed: big ? 2.6 : 1.6, up: 1.5, size: big ? 0.3 : 0.2);
+      _burst(PK.puff, t.pos, 0.6, big ? 12 : 6, const Color(0xFFFFFFFF),
+          speed: big ? 2.6 : 1.6, up: 1.5, size: big ? 0.3 : 0.2);
       sfx.add(Sfx.snowball);
       if (!t.alive) return;
       t.hp -= p.dmg;
       t.flash = 1;
-      if (t.hp <= 0) _killWolf(t);
+      if (t.hp <= 0) _killEnemy(t);
     }
   }
 
   void _catchFish(Fish f) {
     f.alive = false;
-    if (fishPad.isFull) return;
-    final slot = fishPad.items.length + fishPad.incoming;
-    fishPad.incoming++;
+    if (rawPad.isFull) return;
+    final slot = rawPad.items.length + rawPad.incoming;
+    rawPad.incoming++;
     final it = f.kind;
-    flights.add(Flight(it, f.pos, waterZ + 0.1, () => fishPad.slotXY(slot), () => fishPad.slotZ(slot), 0.75,
-        3.4, () {
-      fishPad.incoming--;
-      fishPad.items.add(it);
-      fishPad.bounce = 1;
+    flights.add(Flight(it, f.pos, waterZ + 0.1, () => rawPad.slotXY(slot), () => rawPad.slotZ(slot), 0.75, 3.4, () {
+      rawPad.incoming--;
+      rawPad.items.add(it);
+      rawPad.bounce = 1;
       sfx.add(Sfx.pop);
+      _questEvent(QuestKind.harvest, 1);
     }, spin: 1));
-    if (it != Item.fish) {
-      final n = it == Item.bigFish ? 2 : 1;
-      _gainGems(n, f.pos, 0.6);
-      texts.add(FloatText(f.pos, 1.4, '+$n', const Color(0xFF7FE7FF)));
-    }
+    _rareBonus(it, f.pos);
   }
 
-  void _killWolf(Wolf w) {
+  void _killEnemy(Enemy w) {
     w.alive = false;
     raid.defeated++;
-    _burst(PK.puff, w.pos, 0.5, 18, const Color(0xFFFFFFFF), speed: 3, up: 2.5, size: 0.32, life: 0.9);
-    _burst(PK.spark, w.pos, 0.6, 8, const Color(0xFF8DEBFF), speed: 2.5, up: 4);
-    sfx.add(Sfx.poof);
-    final gems = w.leader ? 4 : 1;
+    _burst(PK.puff, w.pos, 0.5, w.boss ? 36 : 18, const Color(0xFFFFFFFF),
+        speed: w.boss ? 4 : 3, up: 2.5, size: w.boss ? 0.45 : 0.32, life: 0.9);
+    _burst(PK.spark, w.pos, 0.6, w.boss ? 20 : 8, const Color(0xFF8DEBFF), speed: 2.5, up: 4);
+    sfx.add(w.boss ? Sfx.victory : Sfx.poof);
+    if (w.boss) shake = 0.4;
+    final gems = w.boss ? 12 + 3 * regionIndex : 1 + regionIndex ~/ 2;
     raid.earned += gems;
     _gainGems(gems, w.pos, 0.8);
-    texts.add(FloatText(w.pos, 1.5, '+$gems', const Color(0xFF7FE7FF)));
-    final it = w.stolen;
+    texts.add(FloatText(w.pos, 1.5, '+$gems', const Color(0xFF7FE7FF), size: w.boss ? 26 : 17));
+    _questEvent(QuestKind.defeat, 1);
     final src = w.stolenFrom;
-    if (it != null && src != null && !src.isFull) {
-      final slot = src.items.length + src.incoming;
-      src.incoming++;
-      flights.add(Flight(it, w.pos, 0.8, () => src.slotXY(slot), () => src.slotZ(slot), 0.6, 2.2, () {
-        src.incoming--;
-        src.items.add(it);
-        src.bounce = 1;
-      }));
+    if (src != null) {
+      for (final it in w.stolen) {
+        if (src.isFull) break;
+        final slot = src.items.length + src.incoming;
+        src.incoming++;
+        flights.add(Flight(it, w.pos, 0.8, () => src.slotXY(slot), () => src.slotZ(slot), 0.6, 2.2, () {
+          src.incoming--;
+          src.items.add(it);
+          src.bounce = 1;
+        }));
+      }
     }
-    w.stolen = null;
+    w.stolen.clear();
   }
 
   void _updateCannons(double dt) {
@@ -1195,7 +1372,7 @@ class GameWorld {
       if (c.pop < 1) c.pop = math.min(1, c.pop + dt * 2.5);
       c.recoil = math.max(0, c.recoil - dt * 3);
       c.cd -= dt;
-      final w = _nearestWolf(c.pos, 9.5);
+      final w = _nearestEnemy(c.pos, 9.5);
       if (w != null) {
         final want = math.atan2(w.pos.dy - c.pos.dy, w.pos.dx - c.pos.dx);
         c.aim = _lerpAngle(c.aim, want, math.min(1, dt * 8));
@@ -1217,7 +1394,7 @@ class GameWorld {
     return a + d * t;
   }
 
-  // ---------------------------------------------------------------- fish
+  // ------------------------------------------------------------------ fish
   void _spawnFish(double y, double vis) {
     final roll = rnd.nextDouble();
     final kind = roll < 0.07 ? Item.goldFish : (roll < 0.12 ? Item.bigFish : Item.fish);
@@ -1258,7 +1435,7 @@ class GameWorld {
     }
   }
 
-  // ---------------------------------------------------------------- items
+  // ------------------------------------------------------------------ items
   void _pileToActor(Pile pile, Actor a) {
     final it = pile.items.removeLast();
     final idx = pile.items.length;
@@ -1275,9 +1452,14 @@ class GameWorld {
   }
 
   void _actorToPile(Actor a, Pile pile) {
-    final it = a.carry.removeLast();
+    var idx = a.carry.length - 1;
+    while (idx >= 0 && catOf(a.carry[idx]) != pile.cat) {
+      idx--;
+    }
+    if (idx < 0) return;
+    final fz = groundZ(a.pos) + a.stackZ(idx);
+    final it = a.carry.removeAt(idx);
     final from = a.stackPos;
-    final fz = groundZ(a.pos) + a.stackZ(a.carry.length);
     final slot = pile.items.length + pile.incoming;
     pile.incoming++;
     flights.add(Flight(it, from, fz, () => pile.slotXY(slot), () => pile.slotZ(slot), 0.2, 0.8, () {
@@ -1292,25 +1474,22 @@ class GameWorld {
     final p = player;
     _pickCd -= dt;
     if (_pickCd <= 0) {
-      final cat = p.carryCat;
       var done = false;
-      if (cat != null && p.carry.isNotEmpty) {
-        for (final pile in dropPiles) {
-          if (pile.cat == cat && pile.zone.contains(p.pos)) {
-            if (!pile.isFull) {
-              _actorToPile(p, pile);
-              _pickCd = 0.06;
-              done = true;
-            } else {
-              pile.warn = 1;
-            }
-            break;
-          }
+      // the hero may carry a mixed stack: drop whatever each station accepts
+      for (final pile in dropPiles) {
+        if (!pile.zone.contains(p.pos) || !p.carry.any((it) => catOf(it) == pile.cat)) continue;
+        if (!pile.isFull) {
+          _actorToPile(p, pile);
+          _pickCd = 0.06;
+          done = true;
+        } else {
+          pile.warn = 1;
         }
+        break;
       }
       if (!done && !p.isFull) {
         for (final pile in pickPiles) {
-          if (pile.items.isNotEmpty && pile.zone.contains(p.pos) && (cat == null || cat == pile.cat)) {
+          if (pile.items.isNotEmpty && pile.zone.contains(p.pos)) {
             _pileToActor(pile, p);
             _pickCd = 0.06;
             break;
@@ -1322,15 +1501,19 @@ class GameWorld {
     if (_cashCd <= 0) {
       for (final c in cashPiles) {
         if (c.amount > 0 && c.zone.contains(p.pos)) {
-          final chunk = math.min(c.amount, math.max(5, (c.amount / 4).ceil()));
-          c.amount -= chunk;
-          c.bounce = 1;
-          _gainMoney(chunk, c.at, 0.4);
+          _collectFrom(c, c.at);
           _cashCd = 0.05;
           break;
         }
       }
     }
+  }
+
+  void _collectFrom(CashPile c, Offset fxFrom) {
+    final chunk = math.min(c.amount, math.max((5 * mul).round(), (c.amount / 4).ceil()));
+    c.amount -= chunk;
+    c.bounce = 1;
+    _gainMoney(chunk, fxFrom, 0.5);
   }
 
   void _gainMoney(int v, Offset at, double z) {
@@ -1339,81 +1522,165 @@ class GameWorld {
 
   void _gainGems(int n, Offset at, double z) {
     final s = cam.w2s(at.dx, at.dy, z);
-    for (var i = 0; i < n; i++) {
-      hudFlies.add(HudFly(s + Offset(rr(-12, 12), rr(-12, 12)), true, 1, 0.65, i * 0.07));
+    final shown = math.min(n, 8);
+    for (var i = 0; i < shown; i++) {
+      final v = i == shown - 1 ? n - (shown - 1) : 1;
+      hudFlies.add(HudFly(s + Offset(rr(-12, 12), rr(-12, 12)), true, v, 0.65, i * 0.07));
     }
   }
 
-  // ---------------------------------------------------------------- unlocks
+  // ------------------------------------------------------------------ cashier
+  void _updateCashier(double dt) {
+    final c = cashier;
+    if (c == null) return;
+    if (c.pop < 1) c.pop = math.min(1, c.pop + dt * 2.5);
+    c.action = math.max(0, c.action - dt * 4);
+    final speed = courierSpeed * 1.1;
+    var t = c.target;
+    if (t == null || t.amount <= 0) {
+      t = null;
+      var best = 0;
+      for (final cp in cashPiles) {
+        if (cp.amount > best && cp.amount >= (8 * mul).round()) {
+          best = cp.amount;
+          t = cp;
+        }
+      }
+      c.target = t;
+    }
+    if (t == null) {
+      _walkTo(c, cashierHome, speed, dt);
+      return;
+    }
+    if (!_walkTo(c, t.zone.center, speed, dt)) return;
+    c.collectCd -= dt;
+    if (c.collectCd <= 0 && t.amount > 0) {
+      c.collectCd = 0.08;
+      c.action = 1;
+      _collectFrom(t, c.pos);
+    }
+  }
+
+  // ------------------------------------------------------------------ tiles
   void _updateTiles(double dt) {
     _payCd -= dt;
     _coinFxCd -= dt;
+    // paying starts only after standing on a tile for a moment, so walking
+    // across one never spends coins by accident
+    final onTile = tiles.any((t) => tileVisible(t) && t.zone.contains(player.pos)) ||
+        levelTiles.any((t) => levelTileVisible(t) && t.zone.contains(player.pos));
+    _tileDwell = onTile ? _tileDwell + dt : 0;
+    if (_tileDwell < 0.35) _payCd = math.max(_payCd, 0.001);
     for (final t in tiles) {
       if (!tileVisible(t)) continue;
       t.appear = math.min(1, t.appear + dt * 2.2);
       final inside = t.zone.contains(player.pos);
       t.glow = inside ? math.min(1, t.glow + dt * 5) : math.max(0, t.glow - dt * 4);
-      if (inside && _payCd <= 0 && money > 0 && t.paid < t.def.price) {
-        final remain = t.def.price - t.paid;
-        final step = math.max(1, (t.def.price / 36).ceil());
-        final chunk = math.min(remain, math.min(money, step));
-        money -= chunk;
-        t.paid += chunk;
-        dirty = true;
-        _payCd = 0.035;
-        if (_coinFxCd <= 0) {
-          _coinFxCd = 0.07;
-          final from = player.pos;
-          final pz = groundZ(player.pos) + 1.4;
-          flights.add(Flight(null, from, pz, () => t.def.pos, () => groundZ(t.def.pos) + 0.05, 0.25, 0.8, null));
-          sfx.add(Sfx.coin);
-        }
-        if (t.paid >= t.def.price) unlock(t.def.id);
+      if (inside && _payCd <= 0 && money > 0 && t.paid < t.price) {
+        t.paid += _pay(t.price - t.paid, t.price, t.def.pos);
+        if (t.paid >= t.price) unlock(t.def.id);
+      }
+    }
+    for (final t in levelTiles) {
+      t.flash = math.max(0, t.flash - dt * 2);
+      if (!levelTileVisible(t)) continue;
+      t.appear = math.min(1, t.appear + dt * 2.2);
+      final inside = t.zone.contains(player.pos);
+      t.glow = inside ? math.min(1, t.glow + dt * 5) : math.max(0, t.glow - dt * 4);
+      final price = levelPrice(t.kind);
+      if (inside && _payCd <= 0 && money > 0 && t.paid < price) {
+        t.paid += _pay(price - t.paid, price, t.pos);
+        if (t.paid >= price) _levelUp(t);
       }
     }
   }
 
+  int _pay(int remain, int price, Offset target) {
+    final step = math.max(1, (price / 36).ceil());
+    final chunk = math.min(remain, math.min(money, step));
+    money -= chunk;
+    dirty = true;
+    _payCd = 0.035;
+    if (_coinFxCd <= 0) {
+      _coinFxCd = 0.07;
+      flights.add(Flight(null, player.pos, groundZ(player.pos) + 1.4, () => target, () => groundZ(target) + 0.05, 0.25,
+          0.8, null));
+      sfx.add(Sfx.coin);
+    }
+    return chunk;
+  }
+
+  void _levelUp(LevelTile t) {
+    slv[t.kind] = sl(t.kind) + 1;
+    t.paid = 0;
+    t.flash = 1;
+    t.appear = 0.35;
+    _applyLevels();
+    dirty = true;
+    sfx.add(Sfx.unlock);
+    final at = switch (t.kind) {
+      StationKind.pad => rawPad.at,
+      StationKind.procA => procA.pos,
+      StationKind.standA => standA.pos,
+      StationKind.procB => procB?.pos ?? t.pos,
+      StationKind.standB => standB?.pos ?? t.pos,
+    };
+    _burst(PK.confetti, at, 1.2, 26, const Color(0xFFFFFFFF), speed: 3.5, up: 5.5, size: 0.1, life: 1.1);
+    texts.add(FloatText(at, 2.4, 'LV ${sl(t.kind) + 1}', const Color(0xFF5CF0A8), size: 24, max: 1.4));
+    _questEvent(QuestKind.levelUp, 1);
+    events.add('level:${t.kind.name}:${sl(t.kind) + 1}');
+  }
+
   void unlock(String id, {bool silent = false}) {
     if (unlocked.contains(id)) return;
-    final def = unlockDefs.firstWhere((d) => d.id == id);
+    final def = defs.where((d) => d.id == id).firstOrNull;
+    if (def == null) return;
     unlocked.add(id);
     switch (id) {
-      case 'harp1' || 'harp2' || 'harp3' || 'harp4':
-        harpooners.add(Actor(def.pos, Looks.harpooner, facing: math.pi)..pop = silent ? 1 : 0);
+      case 'h1' || 'h2' || 'h3' || 'h4':
+        harvesters.add(Harvester(def.pos, region.helper)..pop = silent ? 1 : 0);
       case 'porter1':
-        _addCourier(def.pos, Looks.porter, fishPad, grill.input, silent);
+        _addCourier(def.pos, Looks.porter, rawPad, procA.input, silent);
       case 'waiter1':
-        _addCourier(def.pos, Looks.waiter, grill.output, standA.stock, silent);
+        _addCourier(def.pos, Looks.waiter, procA.output, standA.stock, silent);
       case 'cannon1' || 'cannon2':
         cannons.add(Cannon(def.pos)..pop = silent ? 1 : 0);
         _rebuildObstacles();
         _pushPlayerOut();
-      case 'chowder':
+      case 'zoneB':
         if (!silent) {
           for (final t in trees) {
-            if (t.inZoneB) _burst(PK.puff, t.pos, 0.6, 8, const Color(0xFFFFFFFF), speed: 2, up: 2.5, size: 0.35, life: 0.9);
+            if (t.inZoneB) {
+              _burst(PK.puff, t.pos, 0.6, 8, const Color(0xFFFFFFFF), speed: 2, up: 2.5, size: 0.35, life: 0.9);
+            }
+          }
+          for (final p in props) {
+            if (p.inZoneB) _burst(PK.puff, p.pos, 0.4, 6, const Color(0xFFFFFFFF), speed: 2, up: 2, size: 0.3, life: 0.8);
           }
         }
         _openZoneB();
       case 'porter2':
-        _addCourier(def.pos, Looks.porter, fishPad, pot!.input, silent);
+        _addCourier(def.pos, Looks.porter, rawPad, procB!.input, silent);
       case 'waiter2':
-        _addCourier(def.pos, Looks.waiter, pot!.output, standB!.stock, silent);
-      case 'lighthouse':
-        lighthouse = true;
+        _addCourier(def.pos, Looks.waiter, procB!.output, standB!.stock, silent);
+      case 'cashier':
+        cashier = Cashier(def.pos, Looks.cashier)..pop = silent ? 1 : 0;
+      case 'landmark':
+        landmark = true;
         _rebuildObstacles();
         _pushPlayerOut();
     }
     _applyUpgrades();
     dirty = true;
     if (!silent) {
-      sfx.add(id == 'lighthouse' ? Sfx.victory : Sfx.unlock);
+      _questEvent(QuestKind.unlock, 1);
+      sfx.add(id == 'landmark' ? Sfx.victory : Sfx.unlock);
       shake = 0.25;
       _burst(PK.confetti, def.pos, 0.8, 46, const Color(0xFFFFFFFF), speed: 4.5, up: 6.5, size: 0.12, life: 1.4);
       _burst(PK.ring, def.pos, 0.05, 1, const Color(0xFFFFFFFF), life: 0.7);
       events.add(switch (id) {
-        'lighthouse' => 'lighthouse',
-        'chowder' => 'zoneB',
+        'landmark' => 'landmark',
+        'zoneB' => 'zoneB',
         _ => 'unlock:${def.name}',
       });
     }
@@ -1439,7 +1706,7 @@ class GameWorld {
     couriers.add(c);
   }
 
-  // ---------------------------------------------------------------- kitchen
+  // ------------------------------------------------------------------ kitchens
   void _updateProcessor(Processor pr, double dt) {
     if (pr.pop < 1) pr.pop = math.min(1, pr.pop + dt * 2);
     final w = pr.working;
@@ -1447,7 +1714,7 @@ class GameWorld {
       pr.anim = math.max(0, pr.anim - dt);
       if (pr.input.items.isNotEmpty) {
         final it = pr.input.items.last;
-        if (pr.output.space >= pr.yieldOf(it)) {
+        if (pr.output.space >= 1) {
           pr.input.items.removeLast();
           pr.input.bounce = 0.5;
           pr.working = it;
@@ -1459,12 +1726,20 @@ class GameWorld {
       return;
     }
     pr.anim += dt;
-    pr.t += dt / (pr.baseTime * kitchenMul);
+    final lvl = sl(pr.isB ? StationKind.procB : StationKind.procA);
+    pr.t += dt / (pr.baseTime * math.pow(0.86, lvl));
     pr.steamCd -= dt;
     if (pr.steamCd <= 0) {
-      pr.steamCd = pr.isPot ? 0.16 : 0.1;
-      parts.add(Particle(PK.steam, pr.workAt.dx + rr(-0.25, 0.25), pr.workAt.dy + rr(-0.25, 0.25), pr.workZ + 0.15,
-          rr(-0.1, 0.1), rr(-0.1, 0.1), rr(0.8, 1.3), rr(0.8, 1.2), rr(0.16, 0.26), const Color(0xFFFFFFFF)));
+      final sparks = region.source == SourceKind.quarry && !pr.isB;
+      pr.steamCd = sparks ? 0.05 : (pr.isB ? 0.16 : 0.1);
+      if (sparks) {
+        parts.add(Particle(PK.spark, pr.workAt.dx, pr.workAt.dy, pr.workZ + 0.2, rr(-1.5, 1.5), rr(-1.5, 1.5),
+            rr(1.0, 2.5), rr(0.25, 0.45), 0.05, const Color(0xFFBDF4FF),
+            grav: 9));
+      } else {
+        parts.add(Particle(PK.steam, pr.workAt.dx + rr(-0.25, 0.25), pr.workAt.dy + rr(-0.25, 0.25), pr.workZ + 0.15,
+            rr(-0.1, 0.1), rr(-0.1, 0.1), rr(0.8, 1.3), rr(0.8, 1.2), rr(0.16, 0.26), const Color(0xFFFFFFFF)));
+      }
     }
     if (pr.t >= 1) {
       final n = pr.yieldOf(w);
@@ -1546,14 +1821,14 @@ class GameWorld {
     }
   }
 
-  // ---------------------------------------------------------------- customers
+  // ------------------------------------------------------------------ customers
   void _updateCounter(Counter k, double dt) {
     if (k.pop < 1) k.pop = math.min(1, k.pop + dt * 2);
-    // keep the queue full
     if (k.queue.length < k.slots.length) {
       k.spawnCd -= dt;
       if (k.spawnCd <= 0) {
-        final want = k.product == Item.cake ? 2 + rnd.nextInt(5) : 1 + rnd.nextInt(3);
+        final isA = catOf(k.product) == Cat.prodA;
+        final want = isA ? 2 + rnd.nextInt(5) : 1 + rnd.nextInt(3);
         final c = Customer(k.entry + Offset(rr(-0.5, 0.5), rr(-0.5, 0.5)), _randomLook(), want, rr(0, 6.28));
         k.queue.add(c);
         k.spawnCd = 0.45;
@@ -1569,7 +1844,8 @@ class GameWorld {
       if (atSlot && c.got + c.pending < c.want) {
         k.buyCd -= dt;
         if (k.buyCd <= 0 && k.stock.items.isNotEmpty) {
-          k.buyCd = buyInterval;
+          final isA = k.stock.cat == Cat.prodA;
+          k.buyCd = 0.22 * math.pow(0.9, sl(isA ? StationKind.standA : StationKind.standB));
           final it = k.stock.items.removeLast();
           final idx = k.stock.items.length;
           final price = priceOf(it);
@@ -1580,6 +1856,7 @@ class GameWorld {
             c.pending--;
             c.got++;
             c.hopV = 2.2;
+            _questEvent(isA ? QuestKind.sellA : QuestKind.sellB, 1);
             flights.add(Flight(null, c.pos, 1.2, () => cash.at, () => 0.1, 0.42, 1.6, () {
               cash.amount += price;
               cash.bounce = 1;
@@ -1594,7 +1871,7 @@ class GameWorld {
         c.target = k.entry + Offset(rr(-1.2, 1.2), rr(-1.2, 1.2));
         c.hopV = 3.2;
         parts.add(Particle(PK.heart, c.pos.dx, c.pos.dy, 2.0, 0, 0, 1.2, 1.1, 0.3, const Color(0xFFFF5D7A)));
-        texts.add(FloatText(c.pos, 2.9, '+${c.want * priceOf(k.product)}', const Color(0xFFFFD447)));
+        texts.add(FloatText(c.pos, 2.9, '+${fmtNum(c.want * priceOf(k.product))}', const Color(0xFFFFD447)));
       }
     }
     for (final c in k.leaving) {
@@ -1615,11 +1892,11 @@ class GameWorld {
     }
   }
 
-  // ---------------------------------------------------------------- raids
+  // ------------------------------------------------------------------ raids
   void _updateRaid(double dt) {
     final r = raid;
     if (!r.enabled) {
-      if (unlocked.contains('harp2') || playTime > 420) {
+      if (unlocked.contains('h2') || playTime > 420) {
         r.enabled = true;
         r.timer = 75;
         dirty = true;
@@ -1639,28 +1916,30 @@ class GameWorld {
       if (r.freeze > 0.5 && r.toSpawn > 0) {
         r.spawnCd -= dt;
         if (r.spawnCd <= 0) {
-          _spawnWolf();
+          _spawnEnemy(boss: r.boss && r.toSpawn == 1);
           r.toSpawn--;
           r.spawnCd = rr(0.45, 1.0);
         }
       }
-      if (r.toSpawn == 0 && wolves.every((w) => !w.alive)) _endRaid();
+      if (r.toSpawn == 0 && enemies.every((w) => !w.alive)) _endRaid();
     }
   }
 
-  int get wolvesLeft => raid.toSpawn + wolves.where((w) => w.alive).length;
+  int get enemiesLeft => raid.toSpawn + enemies.where((w) => w.alive).length;
+  bool get nextRaidIsBoss => raid.index % 4 == 3;
 
   void _startRaid() {
     raid.active = true;
     raid.howled = false;
     raid.defeated = 0;
     raid.earned = 0;
-    final n = math.min(3 + raid.index * 2, 18);
+    raid.boss = nextRaidIsBoss;
+    final n = math.min(3 + raid.index * 2, 18) + (raid.boss ? 1 : 0);
     raid.toSpawn = n;
     raid.total = n;
     raid.spawnCd = 1.0;
-    sfx.add(Sfx.alarm);
-    events.add('raid_start');
+    sfx.add(raid.boss ? Sfx.boss : Sfx.alarm);
+    events.add(raid.boss ? 'boss_start' : 'raid_start');
     shake = 0.35;
   }
 
@@ -1668,30 +1947,30 @@ class GameWorld {
     raid.active = false;
     raid.index++;
     raid.timer = 100 + rnd.nextDouble() * 25;
-    final bonus = 1 + raid.index;
+    final bonus = 1 + raid.index ~/ 2 + regionIndex;
     raid.earned += bonus;
     _gainGems(bonus, player.pos, 2.0);
     events.add('raid_end:${raid.earned}');
     sfx.add(Sfx.victory);
-    wolves.clear();
+    enemies.clear();
     dirty = true;
   }
 
-  void _spawnWolf() {
-    final leader = raid.index >= 2 && raid.toSpawn == 1;
-    final hp = math.min(3 + raid.index, 14) * (leader ? 3 : 1);
+  void _spawnEnemy({bool boss = false}) {
+    final base = math.min(3 + raid.index, 14) * region.enemyHp * (1 + star);
+    final hp = math.max(1, (base * (boss ? 10 : 1)).round());
+    final spd = math.min(region.enemySpeed + raid.index * 0.06, region.enemySpeed + 0.9) * (boss ? 0.72 : 1);
     final y = rr(-6.0, zoneB ? 10.0 : 3.0);
-    final spd = math.min(2.3 + raid.index * 0.08, 3.2) * (leader ? 0.85 : 1);
-    wolves.add(Wolf(Offset(-15.5, y), hp, leader, spd, rr(0, 6.28)));
+    enemies.add(Enemy(Offset(-15.5, y), hp, boss, spd, rr(0, 6.28), boss ? 3 : region.enemySteal));
   }
 
-  Pile? _wolfTarget(Wolf w) {
+  Pile? _enemyTarget(Enemy w) {
     final cands = <Pile>[
-      fishPad,
-      grill.output,
-      grill.input,
-      if (pot != null) pot!.output,
-      if (pot != null) pot!.input,
+      rawPad,
+      procA.output,
+      procA.input,
+      if (procB != null) procB!.output,
+      if (procB != null) procB!.input,
     ];
     Pile? best;
     var bd = double.infinity;
@@ -1706,24 +1985,26 @@ class GameWorld {
     return best;
   }
 
-  void _updateWolves(double dt) {
-    for (final w in wolves) {
+  void _updateEnemies(double dt) {
+    for (final w in enemies) {
       if (!w.alive) continue;
       w.life += dt;
       w.flash = math.max(0, w.flash - dt * 4);
-      w.phase += dt * 12;
+      w.phase += dt * (w.boss ? 7 : 12);
       Offset goal;
       var spd = w.speed;
       if (w.state == 0) {
-        if (w.target == null || w.target!.items.isEmpty) w.target = _wolfTarget(w);
+        if (w.target == null || w.target!.items.isEmpty) w.target = _enemyTarget(w);
         final tg = w.target;
         goal = tg?.at ?? const Offset(5.6, -1.0);
-        if ((goal - w.pos).distanceSquared < 0.6) {
+        if ((goal - w.pos).distanceSquared < (w.boss ? 1.0 : 0.6)) {
           if (tg != null && tg.items.isNotEmpty) {
-            w.stolen = tg.items.removeLast();
+            for (var i = 0; i < w.steal && tg.items.isNotEmpty; i++) {
+              w.stolen.add(tg.items.removeLast());
+            }
             w.stolenFrom = tg;
             tg.bounce = 1;
-            texts.add(FloatText(tg.at, 1.4, '-1', const Color(0xFFFF5A5A)));
+            texts.add(FloatText(tg.at, 1.4, '-${w.stolen.length}', const Color(0xFFFF5A5A)));
             sfx.add(Sfx.pop);
           }
           w.state = 1;
@@ -1734,7 +2015,7 @@ class GameWorld {
         if (w.pos.dx < -16.8) w.alive = false;
       }
       var sep = Offset.zero;
-      for (final o in wolves) {
+      for (final o in enemies) {
         if (identical(o, w) || !o.alive) continue;
         final dd = w.pos - o.pos;
         final l2 = dd.distanceSquared;
@@ -1748,10 +2029,94 @@ class GameWorld {
         w.facing = math.atan2(v.dy, v.dx);
       }
     }
-    wolves.removeWhere((w) => !w.alive);
+    enemies.removeWhere((w) => !w.alive);
   }
 
-  // ---------------------------------------------------------------- effects
+  // ------------------------------------------------------------------ quests
+  void _ensureQuests() {
+    while (quests.length < 3) {
+      quests.add(_newQuest());
+    }
+  }
+
+  static int _nice(double v) {
+    if (v < 10) return math.max(1, v.round());
+    if (v < 100) return (v / 5).round() * 5;
+    if (v < 1000) return (v / 10).round() * 10;
+    final p = math.pow(10, (math.log(v) / math.ln10).floor() - 1).toDouble();
+    return ((v / p).round() * p).round();
+  }
+
+  Quest _newQuest() {
+    final avail = <QuestKind>[QuestKind.harvest, QuestKind.sellA, QuestKind.earn, QuestKind.rare];
+    if (zoneB) avail.add(QuestKind.sellB);
+    if (raid.enabled) avail.add(QuestKind.defeat);
+    if (unlocked.isNotEmpty) avail.add(QuestKind.levelUp);
+    if (tiles.any(tileVisible)) avail.add(QuestKind.unlock);
+    avail.removeWhere((k) => quests.any((q) => q.kind == k && !q.done));
+    final k = avail.isEmpty ? QuestKind.harvest : avail[rnd.nextInt(avail.length)];
+    final f = 1 + 0.25 * math.min(regionQuests, 12);
+    final m = mul * (1 + 0.25 * completed);
+    switch (k) {
+      case QuestKind.harvest:
+        final t = _nice(12 * f);
+        return Quest(k, t, _nice(t * 7 * m), 1);
+      case QuestKind.rare:
+        final t = 2 + regionQuests ~/ 4;
+        return Quest(k, t, 0, t + 1);
+      case QuestKind.sellA:
+        final t = _nice(30 * f);
+        return Quest(k, t, _nice(t * 3 * m), 1);
+      case QuestKind.sellB:
+        final t = _nice(6 * f);
+        return Quest(k, t, _nice(t * 14 * m), 1);
+      case QuestKind.defeat:
+        final t = _nice(4 * f);
+        return Quest(k, t, 0, 2 + t ~/ 2);
+      case QuestKind.earn:
+        final t = _nice(300 * f * m);
+        return Quest(k, t, _nice(t * 0.35), 1);
+      case QuestKind.levelUp:
+        final t = 1 + regionQuests ~/ 5;
+        return Quest(k, t, _nice(250 * m * t), 2);
+      case QuestKind.unlock:
+        return Quest(k, 1, 0, 3);
+    }
+  }
+
+  void _questEvent(QuestKind k, int n) {
+    for (final q in quests) {
+      if (q.kind != k || q.done) continue;
+      q.progress = math.min(q.target, q.progress + n);
+      if (q.done) {
+        events.add('quest');
+        sfx.add(Sfx.quest);
+      }
+    }
+  }
+
+  int get claimableQuests => quests.where((q) => q.done).length;
+
+  bool claimQuest(int i) {
+    if (i < 0 || i >= quests.length || !quests[i].done) return false;
+    final q = quests[i];
+    final from = Offset(cam.size.width / 2, cam.size.height * 0.45);
+    if (q.coins > 0) hudFlies.add(HudFly(from, false, q.coins, 0.7, 0));
+    final shown = math.min(q.gems, 8);
+    for (var g = 0; g < shown; g++) {
+      final v = g == shown - 1 ? q.gems - (shown - 1) : 1;
+      hudFlies.add(HudFly(from + Offset(rr(-20, 20), rr(-20, 20)), true, v, 0.8, 0.1 + g * 0.06));
+    }
+    quests.removeAt(i);
+    regionQuests++;
+    questLevel++;
+    quests.insert(i, _newQuest());
+    dirty = true;
+    sfx.add(Sfx.unlock);
+    return true;
+  }
+
+  // ------------------------------------------------------------------ effects
   static const confettiColors = [
     Color(0xFFFF5D73),
     Color(0xFFFFC93C),
@@ -1769,13 +2134,12 @@ class GameWorld {
       final s = speed * (0.35 + rnd.nextDouble() * 0.65);
       final c = kind == PK.confetti ? confettiColors[rnd.nextInt(confettiColors.length)] : color;
       final g = switch (kind) {
-        PK.confetti || PK.splash || PK.spark => 9.0,
+        PK.confetti || PK.splash || PK.spark || PK.chip => 9.0,
         PK.puff => 1.5,
         _ => 0.0,
       };
-      parts.add(Particle(kind, at.dx, at.dy, z, math.cos(a) * s, math.sin(a) * s,
-          up * (0.5 + rnd.nextDouble() * 0.7), life * (0.7 + rnd.nextDouble() * 0.6),
-          size * (0.7 + rnd.nextDouble() * 0.6), c,
+      parts.add(Particle(kind, at.dx, at.dy, z, math.cos(a) * s, math.sin(a) * s, up * (0.5 + rnd.nextDouble() * 0.7),
+          life * (0.7 + rnd.nextDouble() * 0.6), size * (0.7 + rnd.nextDouble() * 0.6), c,
           grav: g, rot: rnd.nextDouble() * 6, vr: rr(-9, 9)));
     }
   }
@@ -1832,7 +2196,9 @@ class GameWorld {
         } else {
           money += h.value;
           earned += h.value;
+          lifetimeEarned += h.value;
           sfx.add(Sfx.coin);
+          _questEvent(QuestKind.earn, h.value);
         }
         dirty = true;
       }
@@ -1845,34 +2211,78 @@ class GameWorld {
     for (final c in cashPiles) {
       c.bounce = math.max(0, c.bounce - dt * 5);
     }
-    if (lighthouse) lighthouseT += dt;
+    if (landmark) landmarkT += dt;
   }
 
-  // ---------------------------------------------------------------- guide
+  // ------------------------------------------------------------------ guide
   Offset? guideTarget() {
     if (!started) return null;
     UnlockTile? best;
     for (final t in tiles) {
       if (!tileVisible(t)) continue;
-      if (money >= t.def.price - t.paid && (best == null || t.def.price < best.def.price)) best = t;
+      if (money >= t.price - t.paid && (best == null || t.price < best.price)) best = t;
     }
     if (unlocked.length >= 3) return best?.def.pos;
-    final cat = player.carryCat;
-    if (cat == Cat.fish) return grill.input.zone.center;
-    if (cat == Cat.cake) return standA.stock.zone.center;
-    if (cat == Cat.chowder) return standB?.stock.zone.center;
+    if (player.carries(Cat.prodA)) return standA.stock.zone.center;
+    if (player.carries(Cat.prodB)) return standB?.stock.zone.center;
+    if (player.carries(Cat.raw)) {
+      if (!procA.input.isFull) return procA.input.zone.center;
+      if (procA.output.items.isNotEmpty) return procA.output.zone.center;
+      return procA.input.zone.center;
+    }
     if (best != null) return best.def.pos;
     if (standA.cash.amount > 0) return standA.cash.zone.center;
-    if (grill.output.items.length >= 3) return grill.output.zone.center;
-    final onDock = dockRect.contains(player.pos);
-    if (onDock) {
-      return fishPad.items.length >= 6 || fishPad.isFull ? fishPad.zone.center : null;
+    if (procA.output.items.length >= 3) return procA.output.zone.center;
+    final inSource = isRiver ? dockRect.contains(player.pos) : fieldRect.contains(player.pos);
+    if (inSource) {
+      return rawPad.items.length >= 6 || rawPad.isFull ? rawPad.zone.center : null;
     }
-    if (fishPad.items.isNotEmpty) return fishPad.zone.center;
-    return const Offset(-2.3, 0.6);
+    if (rawPad.items.isNotEmpty) return rawPad.zone.center;
+    return isRiver ? const Offset(-2.3, 0.6) : const Offset(-3.4, -1.0);
   }
 
-  // ---------------------------------------------------------------- save
+  // ------------------------------------------------------------------ offline
+  /// Coins the helpers earn while the game is closed (capped at one hour).
+  int offlineReward(double seconds) {
+    if (couriers.length < 2 || harvesters.isEmpty) return 0;
+    final s = seconds.clamp(0, 3600).toDouble();
+    if (s < 120) return 0;
+    final rate =
+        0.04 * (harvesters.length * 2 + couriers.length + (cashier != null ? 2 : 0)) * priceOf(region.prodA);
+    return (rate * s).round();
+  }
+
+  void grantMoney(int amount) {
+    if (amount <= 0) return;
+    hudFlies.add(HudFly(Offset(cam.size.width / 2, cam.size.height * 0.5), false, amount, 0.8, 0.1));
+  }
+
+  // ------------------------------------------------------------------ travel
+  /// Builds the next region of the expedition, carrying over the meta progression.
+  GameWorld travel() {
+    final nextIndex = (regionIndex + 1) % regions.length;
+    final nextStar = star + (regionIndex + 1 >= regions.length ? 1 : 0);
+    final w = GameWorld(regionIndex: nextIndex, star: nextStar);
+    var pendingGems = 0;
+    for (final h in hudFlies) {
+      if (h.gem) pendingGems += h.value;
+    }
+    w.crystals = crystals + pendingGems;
+    w.upg.addAll(upg);
+    w.completed = completed + 1;
+    w.outfitsOwned.addAll(outfitsOwned);
+    w.wearOutfit(outfit);
+    w.questLevel = questLevel;
+    w.lifetimeEarned = lifetimeEarned;
+    w._applyUpgrades();
+    w.quests.clear();
+    w._ensureQuests();
+    w.started = true;
+    w.dirty = true;
+    return w;
+  }
+
+  // ------------------------------------------------------------------ save
   Map<String, dynamic> toJson() {
     var pendingMoney = 0;
     var pendingGems = 0;
@@ -1884,61 +2294,118 @@ class GameWorld {
       }
     }
     return {
-      'v': 1,
+      'v': 2,
+      'region': regionIndex,
+      'star': star,
+      'completed': completed,
       'money': money + pendingMoney,
       'crystals': crystals + pendingGems,
       'earned': earned,
+      'lifetime': lifetimeEarned,
       'playTime': playTime,
       'upg': {for (final u in Upg.values) u.name: lv(u)},
+      'outfit': outfit,
+      'outfits': outfitsOwned.toList(),
+      'questLevel': questLevel,
+      'regionQuests': regionQuests,
+      'quests': [for (final q in quests) q.toJson()],
       'unlocked': [
-        for (final d in unlockDefs)
+        for (final d in defs)
           if (unlocked.contains(d.id)) d.id
       ],
       'paid': {
         for (final t in tiles)
           if (t.paid > 0 && !unlocked.contains(t.def.id)) t.def.id: t.paid
       },
-      'raid': {
-        'enabled': raid.enabled,
-        'index': raid.index,
-        'timer': raid.active ? 30.0 : raid.timer,
-      },
+      'slv': {for (final k in StationKind.values) k.name: sl(k)},
+      'slvPaid': {for (final t in levelTiles) t.kind.name: t.paid},
+      'raid': {'enabled': raid.enabled, 'index': raid.index, 'timer': raid.active ? 30.0 : raid.timer},
       'piles': {
-        for (final p in piles) p.id: [for (final it in p.items) it.index]
+        for (final p in piles) p.id: [for (final it in p.items) it.name]
       },
       'cash': {for (final c in cashPiles) c.id: c.amount},
-      'carry': [for (final it in player.carry) it.index],
+      'carry': [for (final it in player.carry) it.name],
       'pos': [player.pos.dx, player.pos.dy],
+      'lastSeen': DateTime.now().millisecondsSinceEpoch,
     };
   }
 
   static int _i(Object? v, [int d = 0]) => v is num ? v.toInt() : d;
   static double _d(Object? v, [double d = 0]) => v is num ? v.toDouble() : d;
 
-  void loadJson(Map<String, dynamic> j) {
+  static Item? _item(Object? v) {
+    if (v is String) return Item.values.where((e) => e.name == v).firstOrNull;
+    if (v is num) {
+      // version 1 stored indexes of: fish, goldFish, bigFish, cake, chowder
+      final i = v.toInt();
+      return i >= 0 && i < 5 ? Item.values[i] : null;
+    }
+    return null;
+  }
+
+  /// Creates the world described by a save (any version).
+  static GameWorld fromSave(Map<String, dynamic> j) {
+    final region = _i(j['region']).clamp(0, regions.length - 1);
+    final w = GameWorld(regionIndex: region, star: math.max(0, _i(j['star'])));
+    w._load(j);
+    return w;
+  }
+
+  void _load(Map<String, dynamic> j) {
     try {
+      final v1 = _i(j['v'], 1) < 2;
       money = math.max(0, _i(j['money']));
       crystals = math.max(0, _i(j['crystals']));
       earned = math.max(0, _i(j['earned']));
+      lifetimeEarned = math.max(earned, _i(j['lifetime']));
+      completed = math.max(0, _i(j['completed']));
       playTime = _d(j['playTime']);
+      questLevel = math.max(0, _i(j['questLevel']));
+      regionQuests = math.max(0, _i(j['regionQuests']));
       final u = j['upg'];
       if (u is Map) {
         for (final x in Upg.values) {
           upg[x] = _i(u[x.name]).clamp(0, upgMax);
         }
+        if (v1) upg[Upg.helpers] = _i(u['kitchen']).clamp(0, upgMax);
       }
+      final owned = j['outfits'];
+      if (owned is List) {
+        for (final o in owned) {
+          final i = _i(o, -1);
+          if (i >= 0 && i < outfits.length) outfitsOwned.add(i);
+        }
+      }
+      final of = _i(j['outfit']);
+      wearOutfit(outfitsOwned.contains(of) ? of : 0);
       final ul = j['unlocked'];
       if (ul is List) {
-        for (final d in unlockDefs) {
-          if (ul.contains(d.id)) unlock(d.id, silent: true);
+        final ids = ul.map((e) => legacyUnlockIds[e] ?? e).toSet();
+        for (final d in defs) {
+          if (ids.contains(d.id)) unlock(d.id, silent: true);
         }
       }
       final paid = j['paid'];
       if (paid is Map) {
         for (final t in tiles) {
-          t.paid = _i(paid[t.def.id]).clamp(0, t.def.price - 1);
+          final legacy = legacyUnlockIds.entries.where((e) => e.value == t.def.id).map((e) => e.key).firstOrNull;
+          final pv = paid[t.def.id] ?? (legacy != null ? paid[legacy] : null);
+          t.paid = _i(pv).clamp(0, t.price - 1);
         }
       }
+      final lvs = j['slv'];
+      if (lvs is Map) {
+        for (final k in StationKind.values) {
+          slv[k] = _i(lvs[k.name]).clamp(0, stationMaxLevel - 1);
+        }
+      }
+      final lp = j['slvPaid'];
+      if (lp is Map) {
+        for (final t in levelTiles) {
+          t.paid = _i(lp[t.kind.name]).clamp(0, math.max(0, levelPrice(t.kind) - 1));
+        }
+      }
+      _applyLevels();
       final r = j['raid'];
       if (r is Map) {
         raid.enabled = r['enabled'] == true;
@@ -1947,16 +2414,19 @@ class GameWorld {
       }
       final ps = j['piles'];
       if (ps is Map) {
+        const legacyPileIds = {
+          'rawPad': 'fishPad',
+          'procAIn': 'grillIn',
+          'procAOut': 'grillOut',
+          'procBIn': 'potIn',
+          'procBOut': 'potOut',
+        };
         for (final p in piles) {
-          final l = ps[p.id];
+          final l = ps[p.id] ?? ps[legacyPileIds[p.id]];
           if (l is! List) continue;
           p.items
             ..clear()
-            ..addAll(l
-                .whereType<num>()
-                .map((e) => Item.values[e.toInt().clamp(0, Item.values.length - 1)])
-                .where((it) => catOf(it) == p.cat)
-                .take(p.capacity));
+            ..addAll(l.map(_item).whereType<Item>().where((it) => _belongs(it, p.cat)).take(p.capacity));
         }
       }
       final cash = j['cash'];
@@ -1968,16 +2438,24 @@ class GameWorld {
       _applyUpgrades();
       final carry = j['carry'];
       if (carry is List) {
-        final items = carry.whereType<num>().map((e) => Item.values[e.toInt().clamp(0, Item.values.length - 1)]).toList();
-        if (items.isNotEmpty && items.every((it) => catOf(it) == catOf(items.first))) {
-          player.carry.addAll(items.take(player.capacity));
-        }
+        final items = carry.map(_item).whereType<Item>().where(_belongsAny).toList();
+        player.carry.addAll(items.take(player.capacity));
       }
       final pos = j['pos'];
       if (pos is List && pos.length == 2) {
         final p = Offset(_d(pos[0]), _d(pos[1]));
         if (_walkable(p)) player.pos = p;
       }
+      final qs = j['quests'];
+      if (qs is List) {
+        final loaded = qs.map(Quest.fromJson).whereType<Quest>().take(3).toList();
+        if (loaded.isNotEmpty) {
+          quests
+            ..clear()
+            ..addAll(loaded);
+        }
+      }
+      _ensureQuests();
       cam.cx = player.pos.dx;
       cam.cy = player.pos.dy;
     } catch (_) {
@@ -1985,33 +2463,56 @@ class GameWorld {
     }
   }
 
-  /// Debug/demo helper used by the web build (query parameters).
+  bool _belongs(Item it, Cat c) => catOf(it) == c && _belongsAny(it);
+
+  bool _belongsAny(Item it) => switch (catOf(it)) {
+        Cat.raw => it == region.raw || it == region.rare || it == region.big,
+        Cat.prodA => it == region.prodA,
+        Cat.prodB => it == region.prodB,
+      };
+
+  /// Demo / test helper used by the web build (query parameters) and tests.
   void applyDemo(String mode) {
     if (mode == 'rich') {
-      money = 99999;
-      crystals = 99;
+      money = (99999 * mul).round();
+      crystals = 999;
     } else if (mode == 'all') {
-      for (final d in unlockDefs) {
+      for (final d in defs) {
         unlock(d.id, silent: true);
       }
-      money = 5000;
+      money = (5000 * mul).round();
       crystals = 60;
+      for (final k in StationKind.values) {
+        slv[k] = 3;
+      }
+      _applyLevels();
       for (var i = 0; i < 14; i++) {
-        fishPad.items.add(i % 7 == 0 ? Item.goldFish : Item.fish);
-        grill.output.items.add(Item.cake);
-        standA.stock.items.add(Item.cake);
+        rawPad.items.add(i % 7 == 0 ? region.rare : region.raw);
+        procA.output.items.add(region.prodA);
+        standA.stock.items.add(region.prodA);
       }
       for (var i = 0; i < 9; i++) {
-        pot!.output.items.add(Item.chowder);
-        standB!.stock.items.add(Item.chowder);
+        procB!.output.items.add(region.prodB);
+        standB!.stock.items.add(region.prodB);
       }
-      standA.cash.amount = 160;
-      standB!.cash.amount = 240;
+      standA.cash.amount = (160 * mul).round();
+      standB!.cash.amount = (240 * mul).round();
     }
   }
 
-  void triggerRaidSoon() {
+  void triggerRaidSoon({bool boss = false}) {
     raid.enabled = true;
     raid.timer = 3;
+    if (boss) raid.index = 3;
   }
+}
+
+/// Compact number formatting (1.2K, 3.4M ...).
+String fmtNum(num v) {
+  final a = v.abs();
+  if (a >= 1e12) return '${(v / 1e12).toStringAsFixed(a >= 1e13 ? 0 : 1)}T';
+  if (a >= 1e9) return '${(v / 1e9).toStringAsFixed(a >= 1e10 ? 0 : 1)}B';
+  if (a >= 1e6) return '${(v / 1e6).toStringAsFixed(a >= 1e7 ? 0 : 1)}M';
+  if (a >= 1e4) return '${(v / 1e3).toStringAsFixed(a >= 1e5 ? 0 : 1)}K';
+  return v.round().toString();
 }

@@ -32,8 +32,6 @@ class Pal {
   static const iceA = Color(0xFFD3F0FF);
   static const iceB = Color(0xFFAADCF5);
   static const bankFace = Color(0xFFB9DDF4);
-  static const camp = Color(0xFFE7D8CA);
-  static const campEdge = Color(0xFFD6C1AE);
   static const wood = Color(0xFFC27C47);
   static const woodDark = Color(0xFF8E522D);
   static const woodLight = Color(0xFFE3A774);
@@ -43,6 +41,12 @@ class Pal {
   static const metal = Color(0xFF454B5E);
   static const gold = Color(0xFFFFD447);
   static const ink = Color(0xFF1E2238);
+  static const stoneTop = Color(0xFFBAC3D4);
+  static const stoneLeft = Color(0xFF97A2B8);
+  static const stoneRight = Color(0xFF7D879D);
+  static const bark = Color(0xFF7A4B2C);
+  static const barkLight = Color(0xFF9C6A43);
+  static const ring = Color(0xFFE2B47E);
 }
 
 final Map<String, TextPainter> _textCache = {};
@@ -104,8 +108,8 @@ const int _kTree = 0,
     _kPost = 1,
     _kProp = 2,
     _kGate = 3,
-    _kGrill = 4,
-    _kPot = 5,
+    _kProcA = 4,
+    _kProcB = 5,
     _kCrate = 6,
     _kCounter = 7,
     _kPile = 8,
@@ -114,9 +118,10 @@ const int _kTree = 0,
     _kCustomer = 11,
     _kCrowd = 12,
     _kCannon = 13,
-    _kWolf = 14,
-    _kLighthouse = 15,
-    _kPlayer = 16;
+    _kEnemy = 14,
+    _kLandmark = 15,
+    _kPlayer = 16,
+    _kNode = 17;
 
 double _easeOutBack(double t) {
   if (t >= 1) return 1;
@@ -158,12 +163,14 @@ class _Renderer {
     ..strokeCap = StrokeCap.round
     ..strokeJoin = StrokeJoin.round;
 
+  SourceKind get src => w.region.source;
+
   bool _vis(Offset p, double m) =>
       p.dx > -m && p.dx < size.width + m && p.dy > -m && p.dy < size.height + m;
 
   // =========================================================== sprite cache
-  // Static scenery (trees, fence logs) and the idle crowd are rendered once
-  // into textures and then drawn with a single call each frame.
+  // Static scenery (trees, fence logs, boulders) and the idle crowd are
+  // rendered once into textures and then drawn with a single call each frame.
   static final Map<String, ui.Image> _sprites = {};
   static final Expando<(int, ui.Image)> _personSprites = Expando();
   static double _spriteScale = -1, _spriteDpr = -1;
@@ -182,7 +189,7 @@ class _Renderer {
     }
   }
 
-  ui.Image _renderSprite(double w, double h, double ax, double ay, void Function() draw) {
+  ui.Image _renderSprite(double w0, double h0, double ax, double ay, void Function() draw) {
     final dpr = cam.dpr;
     final rec = ui.PictureRecorder();
     final saved = c;
@@ -192,17 +199,17 @@ class _Renderer {
     draw();
     final pic = rec.endRecording();
     c = saved;
-    final img = pic.toImageSync(math.max(1, (w * dpr).ceil()), math.max(1, (h * dpr).ceil()));
+    final img = pic.toImageSync(math.max(1, (w0 * dpr).ceil()), math.max(1, (h0 * dpr).ceil()));
     pic.dispose();
     return img;
   }
 
-  ui.Image _sprite(String key, double w, double h, double ax, double ay, void Function() draw) =>
-      _sprites[key] ??= _renderSprite(w, h, ax, ay, draw);
+  ui.Image _sprite(String key, double w0, double h0, double ax, double ay, void Function() draw) =>
+      _sprites[key] ??= _renderSprite(w0, h0, ax, ay, draw);
 
-  void _blit(ui.Image img, Offset at, double w, double h, double ax, double ay) {
+  void _blit(ui.Image img, Offset at, double w0, double h0, double ax, double ay) {
     c.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-        Rect.fromLTWH(at.dx - ax, at.dy - ay, w, h), _imgPaint);
+        Rect.fromLTWH(at.dx - ax, at.dy - ay, w0, h0), _imgPaint);
   }
 
   void _poly(List<Offset> pts, Color col) {
@@ -253,9 +260,9 @@ class _Renderer {
     c.drawOval(Rect.fromCenter(center: t, width: tx * 2, height: ty * 2), _p);
   }
 
-  void _shadow(Offset g, double w, double h, [double a = 0.16]) {
+  void _shadow(Offset g, double w0, double h0, [double a = 0.16]) {
     _p.color = Color.fromRGBO(20, 30, 60, a);
-    c.drawOval(Rect.fromCenter(center: g, width: w, height: h), _p);
+    c.drawOval(Rect.fromCenter(center: g, width: w0, height: h0), _p);
   }
 
   Path _roundQuad(Rect r, double z, double cut) {
@@ -282,13 +289,18 @@ class _Renderer {
     _p.shader = null;
     _p.color = Pal.snow;
     c.drawRect(Offset.zero & size, _p);
-    _river();
-    _nearBank();
+    if (w.isRiver) {
+      _river();
+      _nearBank();
+    } else {
+      _field();
+    }
     _drifts();
     _campFloor();
-    _dock();
+    if (w.isRiver) _dock();
     _pads();
     _tiles();
+    _levelTiles();
     _objects();
     _projectiles();
     _flights();
@@ -304,6 +316,13 @@ class _Renderer {
   }
 
   // =========================================================== ground
+  double _wrapY(double base, double period) {
+    var fy = base % period;
+    final start = cam.cy - period / 2;
+    fy += ((start - fy) / period).ceil() * period;
+    return fy;
+  }
+
   void _river() {
     final fr = w.raid.freeze;
     final y0 = cam.cy - 45, y1 = cam.cy + 45;
@@ -319,17 +338,9 @@ class _Renderer {
     c.drawPath(Path()..addPolygon([a, b, cc, d], true), paint);
 
     const period = 46.0;
-    double wrapY(double base) {
-      var fy = base % period;
-      final start = cam.cy - period / 2;
-      fy += ((start - fy) / period).ceil() * period;
-      return fy;
-    }
-
-    // drifting ice floes
     for (var i = 0; i < 12; i++) {
       final fx = riverX0 + 0.8 + _h1(i + 900) * (riverX1 - riverX0 - 1.6);
-      final fy = wrapY(_h1(i + 950) * period + w.time * 0.55);
+      final fy = _wrapY(_h1(i + 950) * period + w.time * 0.55, period);
       final ctr = cam.w2s(fx, fy, waterZ + 0.02);
       if (!_vis(ctr, 3 * s)) continue;
       final rad = 0.35 + _h1(i + 980) * 0.5;
@@ -348,19 +359,17 @@ class _Renderer {
       _ps.color = Colors.white.withValues(alpha: 0.33 * (1 - fr));
       for (var i = 0; i < 70; i++) {
         final fx = riverX0 + 0.4 + _h1(i) * (riverX1 - riverX0 - 0.8);
-        final fy = wrapY(_h1(i + 100) * period + w.time * (0.6 + _h1(i + 200) * 0.6));
+        final fy = _wrapY(_h1(i + 100) * period + w.time * (0.6 + _h1(i + 200) * 0.6), period);
         final p1 = cam.w2s(fx, fy, waterZ);
         if (!_vis(p1, 30)) continue;
         final p2 = cam.w2s(fx + 0.03, fy + 0.5 + _h1(i + 300) * 0.7, waterZ);
         c.drawLine(p1, p2, _ps);
       }
-      // twinkles
-      _p.color = Colors.white;
       for (var i = 0; i < 26; i++) {
         final tw = math.sin(w.time * 2.6 + i * 1.7);
         if (tw < 0.55) continue;
         final fx = riverX0 + 0.5 + _h1(i + 400) * (riverX1 - riverX0 - 1.0);
-        final fy = wrapY(_h1(i + 450) * period + w.time * 0.5);
+        final fy = _wrapY(_h1(i + 450) * period + w.time * 0.5, period);
         final p = cam.w2s(fx, fy, waterZ);
         if (!_vis(p, 10)) continue;
         _p.color = Colors.white.withValues(alpha: (tw - 0.55) * 2.0 * (1 - fr));
@@ -372,7 +381,7 @@ class _Renderer {
       _ps.strokeWidth = math.max(1, 0.04 * s);
       for (var i = 0; i < 26; i++) {
         final fx = riverX0 + 0.6 + _h1(i + 600) * (riverX1 - riverX0 - 1.2);
-        final fy = wrapY(_h1(i + 650) * period);
+        final fy = _wrapY(_h1(i + 650) * period, period);
         var p = cam.w2s(fx, fy, waterZ);
         if (!_vis(p, 3 * s)) continue;
         final path = Path()..moveTo(p.dx, p.dy);
@@ -386,7 +395,6 @@ class _Renderer {
       }
     }
 
-    // fish swim under the dock, so they are drawn with the water
     for (final f in w.fish) {
       if (f.vis <= 0.01) continue;
       final sp = cam.w2s(f.pos.dx, f.pos.dy, waterZ + 0.05);
@@ -402,7 +410,6 @@ class _Renderer {
       _fishS(sp, f.kind, ang, alpha: 0.95 * f.vis, flash: f.flash);
     }
 
-    // far bank ice face
     final f0 = cam.w2s(riverX0, y0, waterZ), f1 = cam.w2s(riverX0, y1, waterZ);
     final f2 = cam.w2s(riverX0, y1, 0), f3 = cam.w2s(riverX0, y0, 0);
     _poly([f0, f1, f2, f3], Pal.bankFace);
@@ -429,6 +436,57 @@ class _Renderer {
     c.drawLine(m0, m1, _ps);
   }
 
+  /// The quarry floor or the forest clearing where resources are gathered.
+  void _field() {
+    final quarry = src == SourceKind.quarry;
+    final fr = w.raid.freeze;
+    final y0 = cam.cy - 45, y1 = cam.cy + 45;
+    final base = quarry ? const Color(0xFFC9D2E2) : const Color(0xFFE3EAE4);
+    final edge = quarry ? const Color(0xFFB2BDD1) : const Color(0xFFCFDACF);
+    _poly([cam.w2s(riverX0 - 0.4, y0), cam.w2s(riverX1 + 0.3, y0), cam.w2s(riverX1 + 0.3, y1), cam.w2s(riverX0 - 0.4, y1)],
+        Color.lerp(edge, Pal.snow, fr * 0.6)!);
+    _poly([cam.w2s(riverX0, y0), cam.w2s(riverX1, y0), cam.w2s(riverX1, y1), cam.w2s(riverX0, y1)],
+        Color.lerp(base, Pal.snow, fr * 0.7)!);
+    const cell = 1.7;
+    final iy0 = ((cam.cy - 26) / cell).floor(), iy1 = ((cam.cy + 26) / cell).ceil();
+    final ix0 = (riverX0 / cell).floor(), ix1 = (riverX1 / cell).ceil();
+    for (var ix = ix0; ix <= ix1; ix++) {
+      for (var iy = iy0; iy <= iy1; iy++) {
+        final h = _h2(ix + 400, iy - 70);
+        if (h > 0.55) continue;
+        final px = (ix + _h2(iy + 31, ix + 2)) * cell, py = (iy + _h2(ix - 9, iy + 13)) * cell;
+        if (px < riverX0 + 0.3 || px > riverX1 - 0.3) continue;
+        final sp = cam.w2s(px, py, 0);
+        if (!_vis(sp, 2 * s)) continue;
+        final r = (0.12 + h * 0.5) * s;
+        if (quarry) {
+          final pts = <Offset>[];
+          for (var k = 0; k < 6; k++) {
+            final a = k / 6 * math.pi * 2;
+            final rr = r * (0.7 + _h2(ix * 7 + k, iy) * 0.5);
+            pts.add(sp + Offset(math.cos(a) * rr, math.sin(a) * rr * 0.6));
+          }
+          _poly(pts, Color.lerp(const Color(0xFFAEB9CD), Pal.snow, fr * 0.7)!);
+          if (h < 0.18) {
+            _ps.color = const Color(0x557D879D);
+            _ps.strokeWidth = math.max(1, 0.03 * s);
+            c.drawLine(sp.translate(-r * 2, 0), sp.translate(r * 1.4, r * 0.8), _ps);
+          }
+        } else {
+          _p.color = Color.lerp(h < 0.25 ? const Color(0xFFC9B79C) : const Color(0xFFC6D6C8), Pal.snow, fr * 0.7)!;
+          c.drawOval(Rect.fromCenter(center: sp, width: r * 2.4, height: r * 1.1), _p);
+        }
+      }
+    }
+    // the far edge: a low ridge of rocks or a band of drifts
+    _ps.color = quarry ? const Color(0xFF9AA5BA) : Colors.white;
+    _ps.strokeWidth = 0.3 * s;
+    c.drawLine(cam.w2s(riverX0, y0), cam.w2s(riverX0, y1), _ps);
+    _ps.color = Colors.white.withValues(alpha: 0.9);
+    _ps.strokeWidth = 0.12 * s;
+    c.drawLine(cam.w2s(riverX0 - 0.1, y0, 0.1), cam.w2s(riverX0 - 0.1, y1, 0.1), _ps);
+  }
+
   void _drifts() {
     final center = cam.s2w(Offset(size.width / 2, size.height / 2));
     const cell = 4.0;
@@ -453,20 +511,18 @@ class _Renderer {
 
   void _campFloor() {
     final r = w.zoneB ? Rect.fromLTRB(zoneARect.left, zoneARect.top, zoneARect.right, zoneBRect.bottom) : zoneARect;
-    c.drawPath(_roundQuad(r.inflate(0.12), 0, 0.8), _p..color = Pal.campEdge);
-    c.drawPath(_roundQuad(r.deflate(0.2), 0, 0.7), _p..color = Pal.camp);
-    // pebbles & footprints
+    c.drawPath(_roundQuad(r.inflate(0.12), 0, 0.8), _p..color = w.region.campEdge);
+    c.drawPath(_roundQuad(r.deflate(0.2), 0, 0.7), _p..color = w.region.camp);
     for (var i = 0; i < 55; i++) {
       final px = r.left + 0.5 + _h1(i + 1200) * (r.width - 1.0);
       final py = r.top + 0.5 + _h1(i + 1300) * (r.height - 1.0);
       final sp = cam.w2s(px, py, 0);
       if (!_vis(sp, 20)) continue;
       final rad = (0.05 + _h1(i + 1400) * 0.08) * s;
-      _p.color = Pal.campEdge.withValues(alpha: 0.9);
+      _p.color = w.region.campEdge.withValues(alpha: 0.9);
       c.drawOval(Rect.fromCenter(center: sp, width: rad * 2, height: rad * 1.3), _p);
     }
     if (!w.zoneB) {
-      // fenced plot that can be unlocked: mark it with a soft dashed outline
       final path = _roundQuad(zoneBRect.deflate(0.4), 0, 0.8);
       _ps.color = const Color(0x66A7B6D6);
       _ps.strokeWidth = 0.06 * s;
@@ -486,7 +542,6 @@ class _Renderer {
     for (var x = r.left + 0.42; x < r.right + 0.5; x += 0.42) {
       c.drawLine(cam.w2s(x, r.top, dockZ), cam.w2s(x, r.bottom, dockZ), _ps);
     }
-    // snow along the edges
     _ps.color = Colors.white.withValues(alpha: 0.9);
     _ps.strokeWidth = 0.1 * s;
     c.drawLine(cam.w2s(r.left + 0.05, r.top + 0.05, dockZ), cam.w2s(r.left + 0.05, r.bottom - 0.05, dockZ), _ps);
@@ -544,7 +599,7 @@ class _Renderer {
       final path = _roundQuad(r, z, 0.32 * a);
       _p.color = const Color(0xE8203A66);
       c.drawPath(path, _p);
-      final f = t.paid / t.def.price;
+      final f = t.paid / t.price;
       if (f > 0) {
         c.save();
         c.clipPath(path);
@@ -563,13 +618,63 @@ class _Renderer {
       c.drawPath(path, _ps);
       final ctr = cam.w2s(t.def.pos.dx, t.def.pos.dy, z);
       _tileIcon(t.def.icon, ctr.translate(0, -0.2 * s * a), 0.46 * s * a);
-      final remain = t.def.price - t.paid;
-      final txt = _fmt(remain);
-      final tp = _tp(txt, 0.36 * s * a, Colors.white);
-      final total = tp.width + 0.3 * s * a;
-      final left = ctr.dx - total / 2;
-      _coinIcon(Offset(left + 0.12 * s * a, ctr.dy + 0.3 * s * a), 0.12 * s * a);
-      tp.paint(c, Offset(left + 0.3 * s * a, ctr.dy + 0.3 * s * a - tp.height / 2));
+      _priceTag(t.price - t.paid, ctr.translate(0, 0.3 * s * a), a);
+    }
+  }
+
+  void _priceTag(int amount, Offset at, double a) {
+    final tp = _tp(fmtNum(amount), 0.34 * s * a, Colors.white);
+    final total = tp.width + 0.3 * s * a;
+    final left = at.dx - total / 2;
+    _coinIcon(Offset(left + 0.12 * s * a, at.dy), 0.12 * s * a);
+    tp.paint(c, Offset(left + 0.3 * s * a, at.dy - tp.height / 2));
+  }
+
+  void _levelTiles() {
+    for (final t in w.levelTiles) {
+      if (!w.levelTileVisible(t) || t.appear <= 0) continue;
+      final a = _easeOutBack(t.appear);
+      final r = Rect.fromCenter(center: t.pos, width: 1.25 * a, height: 1.25 * a);
+      final z = w.groundZ(t.pos) + 0.015;
+      final path = _roundQuad(r, z, 0.26 * a);
+      _p.color = Color.lerp(const Color(0xE81F5A49), Colors.white, t.flash * 0.6)!;
+      c.drawPath(path, _p);
+      final price = w.levelPrice(t.kind);
+      final f = (t.paid / price).clamp(0.0, 1.0);
+      if (f > 0) {
+        c.save();
+        c.clipPath(path);
+        final y = r.bottom - r.height * f;
+        _poly([
+          cam.w2s(r.left - 0.1, y, z),
+          cam.w2s(r.right + 0.1, y, z),
+          cam.w2s(r.right + 0.1, r.bottom + 0.1, z),
+          cam.w2s(r.left - 0.1, r.bottom + 0.1, z),
+        ], const Color(0xE65CF0A8));
+        c.restore();
+      }
+      _ps.color = Color.lerp(const Color(0xFFB8FFD9), const Color(0xFFFFE066), t.glow)!;
+      _ps.strokeWidth = (0.06 + 0.03 * t.glow) * s;
+      c.drawPath(path, _ps);
+      final ctr = cam.w2s(t.pos.dx, t.pos.dy, z);
+      final bob = math.sin(w.time * 5 + t.pos.dx) * 0.04 * s;
+      final ic = ctr.translate(-0.2 * s * a, -0.2 * s * a + bob);
+      _p.color = const Color(0xFF5CF0A8);
+      c.drawCircle(ic, 0.17 * s * a, _p);
+      _p.color = const Color(0xFF14412F);
+      c.drawPath(
+          Path()
+            ..moveTo(ic.dx, ic.dy - 0.11 * s * a)
+            ..lineTo(ic.dx + 0.1 * s * a, ic.dy + 0.01 * s * a)
+            ..lineTo(ic.dx + 0.04 * s * a, ic.dy + 0.01 * s * a)
+            ..lineTo(ic.dx + 0.04 * s * a, ic.dy + 0.1 * s * a)
+            ..lineTo(ic.dx - 0.04 * s * a, ic.dy + 0.1 * s * a)
+            ..lineTo(ic.dx - 0.04 * s * a, ic.dy + 0.01 * s * a)
+            ..lineTo(ic.dx - 0.1 * s * a, ic.dy + 0.01 * s * a)
+            ..close(),
+          _p);
+      _text('${w.sl(t.kind) + 2}', ctr.translate(0.16 * s * a, -0.19 * s * a + bob), 0.3 * s * a, Colors.white);
+      _priceTag(price - t.paid, ctr.translate(0, 0.25 * s * a), a * 0.9);
     }
   }
 
@@ -577,20 +682,45 @@ class _Renderer {
     _p.color = Colors.white;
     _ps.color = Colors.white;
     switch (icon) {
-      case TileIcon.harpoon:
-        _ps.strokeWidth = sz * 0.12;
-        c.drawLine(o.translate(-sz * 0.45, sz * 0.4), o.translate(sz * 0.35, -sz * 0.3), _ps);
-        c.drawPath(
-            Path()
-              ..moveTo(o.dx + sz * 0.5, o.dy - sz * 0.45)
-              ..lineTo(o.dx + sz * 0.18, o.dy - sz * 0.32)
-              ..lineTo(o.dx + sz * 0.38, o.dy - sz * 0.12)
-              ..close(),
-            _p);
-        c.drawCircle(o.translate(-sz * 0.35, -sz * 0.1), sz * 0.16, _p);
+      case TileIcon.helper:
+        switch (src) {
+          case SourceKind.river:
+            _ps.strokeWidth = sz * 0.12;
+            c.drawLine(o.translate(-sz * 0.45, sz * 0.4), o.translate(sz * 0.35, -sz * 0.3), _ps);
+            c.drawPath(
+                Path()
+                  ..moveTo(o.dx + sz * 0.5, o.dy - sz * 0.45)
+                  ..lineTo(o.dx + sz * 0.18, o.dy - sz * 0.32)
+                  ..lineTo(o.dx + sz * 0.38, o.dy - sz * 0.12)
+                  ..close(),
+                _p);
+            c.drawCircle(o.translate(-sz * 0.35, -sz * 0.1), sz * 0.16, _p);
+          case SourceKind.quarry:
+            _ps.strokeWidth = sz * 0.12;
+            c.drawLine(o.translate(-sz * 0.35, sz * 0.45), o.translate(sz * 0.2, -sz * 0.2), _ps);
+            c.drawPath(
+                Path()
+                  ..moveTo(o.dx - sz * 0.25, o.dy - sz * 0.45)
+                  ..quadraticBezierTo(o.dx + sz * 0.2, o.dy - sz * 0.45, o.dx + sz * 0.5, o.dy + sz * 0.05),
+                _ps);
+          case SourceKind.grove:
+            _ps.strokeWidth = sz * 0.12;
+            c.drawLine(o.translate(-sz * 0.35, sz * 0.45), o.translate(sz * 0.15, -sz * 0.35), _ps);
+            c.drawPath(
+                Path()
+                  ..moveTo(o.dx + sz * 0.05, o.dy - sz * 0.5)
+                  ..lineTo(o.dx + sz * 0.5, o.dy - sz * 0.3)
+                  ..lineTo(o.dx + sz * 0.35, o.dy + sz * 0.05)
+                  ..lineTo(o.dx + sz * 0.0, o.dy - sz * 0.2)
+                  ..close(),
+                _p);
+        }
       case TileIcon.porter:
         c.drawCircle(o.translate(-sz * 0.12, -sz * 0.3), sz * 0.2, _p);
-        c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: o.translate(-sz * 0.12, sz * 0.18), width: sz * 0.5, height: sz * 0.55), Radius.circular(sz * 0.2)), _p);
+        c.drawRRect(
+            RRect.fromRectAndRadius(Rect.fromCenter(center: o.translate(-sz * 0.12, sz * 0.18), width: sz * 0.5, height: sz * 0.55),
+                Radius.circular(sz * 0.2)),
+            _p);
         c.drawRect(Rect.fromCenter(center: o.translate(sz * 0.32, sz * 0.05), width: sz * 0.36, height: sz * 0.36), _p);
       case TileIcon.waiter:
         c.drawPath(
@@ -618,7 +748,7 @@ class _Renderer {
         c.drawLine(o.translate(0, -sz * 0.1), o.translate(sz * 0.5, -sz * 0.1), _ps);
         c.drawLine(o.translate(sz * 0.32, -sz * 0.1), o.translate(sz * 0.32, sz * 0.12), _ps);
         c.drawLine(o.translate(sz * 0.48, -sz * 0.1), o.translate(sz * 0.48, sz * 0.08), _ps);
-      case TileIcon.lighthouse:
+      case TileIcon.landmark:
         c.drawPath(
             Path()
               ..moveTo(o.dx - sz * 0.25, o.dy + sz * 0.5)
@@ -631,6 +761,12 @@ class _Renderer {
         _ps.strokeWidth = sz * 0.07;
         c.drawLine(o.translate(-sz * 0.25, -sz * 0.45), o.translate(-sz * 0.55, -sz * 0.55), _ps);
         c.drawLine(o.translate(sz * 0.25, -sz * 0.45), o.translate(sz * 0.55, -sz * 0.55), _ps);
+      case TileIcon.cashier:
+        c.drawOval(Rect.fromCenter(center: o.translate(0, sz * 0.1), width: sz * 0.8, height: sz * 0.7), _p);
+        c.drawRect(Rect.fromCenter(center: o.translate(0, -sz * 0.3), width: sz * 0.3, height: sz * 0.16), _p);
+        _ps.color = const Color(0xFF203A66);
+        _ps.strokeWidth = sz * 0.08;
+        c.drawCircle(o.translate(0, sz * 0.1), sz * 0.16, _ps);
     }
   }
 
@@ -646,19 +782,22 @@ class _Renderer {
       if (_vis(cam.w2s(p.dx, p.dy), 1.5 * s)) add(p, _kPost, p);
     }
     for (final p in w.props) {
-      if (_vis(cam.w2s(p.pos.dx, p.pos.dy), 2 * s)) add(p.pos, _kProp, p);
+      if (_vis(cam.w2s(p.pos.dx, p.pos.dy), 2.5 * s)) add(p.pos, _kProp, p);
+    }
+    for (final n in w.nodes) {
+      if (_vis(cam.w2s(n.pos.dx, n.pos.dy), 3 * s)) add(n.pos, _kNode, n);
     }
     if (!w.zoneB) add(const Offset(4.5, 4.0), _kGate, 0);
-    add(w.grill.pos, _kGrill, w.grill);
-    add(w.grill.chef.pos, _kActor, w.grill.chef);
-    add(w.grill.output.at, _kPile, w.grill.output);
-    add(w.fishPad.at, _kPile, w.fishPad);
-    final pot = w.pot;
-    if (pot != null) {
-      add(pot.pos, _kPot, pot);
-      add(pot.chef.pos, _kActor, pot.chef);
-      add(const Offset(3.45, 6.25), _kCrate, pot.input);
-      add(pot.output.at, _kPile, pot.output);
+    add(w.procA.pos, _kProcA, w.procA);
+    add(w.procA.chef.pos, _kActor, w.procA.chef);
+    add(w.procA.output.at, _kPile, w.procA.output);
+    add(w.rawPad.at, _kPile, w.rawPad);
+    final pb = w.procB;
+    if (pb != null) {
+      add(pb.pos, _kProcB, pb);
+      add(pb.chef.pos, _kActor, pb.chef);
+      add(const Offset(3.45, 6.25), _kCrate, pb.input);
+      add(pb.output.at, _kPile, pb.output);
     }
     for (final k in w.counters) {
       add(k.pos, _kCounter, k);
@@ -673,19 +812,21 @@ class _Renderer {
         if (_vis(cam.w2s(cu.pos.dx, cu.pos.dy), 2 * s)) add(cu.pos, _kCrowd, cu);
       }
     }
-    for (final h in w.harpooners) {
+    for (final h in w.harvesters) {
       add(h.pos, _kActor, h);
     }
     for (final cr in w.couriers) {
       add(cr.pos, _kActor, cr);
     }
+    final cs = w.cashier;
+    if (cs != null) add(cs.pos, _kActor, cs);
     for (final cn in w.cannons) {
       add(cn.pos, _kCannon, cn);
     }
-    for (final wf in w.wolves) {
-      add(wf.pos, _kWolf, wf);
+    for (final e in w.enemies) {
+      add(e.pos, _kEnemy, e);
     }
-    if (w.lighthouse) add(lighthousePos, _kLighthouse, 0);
+    if (w.landmark) add(landmarkPos, _kLandmark, 0);
     add(w.player.pos, _kPlayer, w.player, 0.01);
     ds.sort((a, b) => a.d.compareTo(b.d));
     for (final d in ds) {
@@ -696,12 +837,14 @@ class _Renderer {
           _post(d.o as Offset);
         case _kProp:
           _prop(d.o as Prop);
+        case _kNode:
+          _node(d.o as Node);
         case _kGate:
           _gate();
-        case _kGrill:
-          _grill(d.o as Processor);
-        case _kPot:
-          _pot(d.o as Processor);
+        case _kProcA:
+          _procA(d.o as Processor);
+        case _kProcB:
+          _procB(d.o as Processor);
         case _kCrate:
           _crate(d.o as Pile);
         case _kCounter:
@@ -721,10 +864,10 @@ class _Renderer {
           _crowdMember(d.o as Customer);
         case _kCannon:
           _cannon(d.o as Cannon);
-        case _kWolf:
-          _wolf(d.o as Wolf);
-        case _kLighthouse:
-          _lighthouse();
+        case _kEnemy:
+          _enemy(d.o as Enemy);
+        case _kLandmark:
+          _landmark();
         case _kPlayer:
           _playerRing();
           _actor(d.o as Actor);
@@ -735,17 +878,17 @@ class _Renderer {
   void _crowdMember(Customer cu) {
     final g = cam.w2s(cu.pos.dx, cu.pos.dy, 0);
     _shadow(g, 0.82 * s, 0.38 * s, 0.17);
-    final w = 1.04 * s, h = 2.0 * s, ax = 0.52 * s, ay = 1.92 * s;
+    final w0 = 1.04 * s, h0 = 2.0 * s, ax = 0.52 * s, ay = 1.92 * s;
     var rec = _personSprites[cu];
     if (rec == null || rec.$1 != _spriteGen) {
       rec = (
         _spriteGen,
-        _renderSprite(w, h, ax, ay,
+        _renderSprite(w0, h0, ax, ay,
             () => _person(cu.pos, 0, cu.facing, 0, 0, cu.look, simple: true, at: Offset.zero, shadow: false)),
       );
       _personSprites[cu] = rec;
     }
-    _blit(rec.$2, g.translate(0, -cu.hop * s * kZ), w, h, ax, ay);
+    _blit(rec.$2, g.translate(0, -cu.hop * s * kZ), w0, h0, ax, ay);
   }
 
   void _tree(Tree t) {
@@ -753,17 +896,17 @@ class _Renderer {
     final sb = ((t.size - 0.75) / 0.12).round().clamp(0, 5);
     final tb = (t.tint * 2).round().clamp(0, 2);
     final q = s * (0.75 + sb * 0.12);
-    final w = 1.64 * q, h = 2.36 * q, ax = 0.7 * q, ay = 2.02 * q;
-    final img = _sprite('tree$sb-$tb', w, h, ax, ay, () => _treeAt(Offset.zero, q, tb / 2));
-    _blit(img, g, w, h, ax, ay);
+    final w0 = 1.64 * q, h0 = 2.36 * q, ax = 0.7 * q, ay = 2.02 * q;
+    final img = _sprite('tree$sb-$tb', w0, h0, ax, ay, () => _treeAt(Offset.zero, q, tb / 2));
+    _blit(img, g, w0, h0, ax, ay);
   }
 
-  void _treeAt(Offset g, double q, double tint) {
-    _shadow(g.translate(0.18 * q, 0.04 * q), 1.3 * q, 0.5 * q, 0.12);
-    _p.color = const Color(0xFF7A4B2C);
+  void _treeAt(Offset g, double q, double tint, {Color? needle, Color? needleDark, bool shadow = true}) {
+    if (shadow) _shadow(g.translate(0.18 * q, 0.04 * q), 1.3 * q, 0.5 * q, 0.12);
+    _p.color = Pal.bark;
     c.drawRect(Rect.fromLTWH(g.dx - 0.08 * q, g.dy - 0.42 * q, 0.16 * q, 0.42 * q), _p);
-    final green = Color.lerp(Pal.pine, const Color(0xFF3D8270), tint)!;
-    final dark = Color.lerp(Pal.pineDark, const Color(0xFF2B6356), tint)!;
+    final green = needle ?? Color.lerp(Pal.pine, const Color(0xFF3D8270), tint)!;
+    final dark = needleDark ?? Color.lerp(Pal.pineDark, const Color(0xFF2B6356), tint)!;
     for (var i = 0; i < 3; i++) {
       final base = g.dy - (0.3 + i * 0.44) * q;
       final apex = base - (0.95 - i * 0.12) * q;
@@ -808,15 +951,20 @@ class _Renderer {
 
   void _post(Offset p) {
     final g = cam.w2s(p.dx, p.dy, 0);
-    final w = 0.36 * s, h = 0.88 * s, ax = 0.18 * s, ay = 0.74 * s;
-    final img = _sprite('post', w, h, ax, ay, () => _postAt(Offset.zero));
-    _blit(img, g, w, h, ax, ay);
+    final w0 = 0.36 * s, h0 = 0.98 * s, ax = 0.18 * s, ay = 0.84 * s;
+    final img = _sprite('post${w.regionIndex}', w0, h0, ax, ay, () => _postAt(Offset.zero));
+    _blit(img, g, w0, h0, ax, ay);
   }
 
   void _postAt(Offset g) {
     final r = 0.15 * s, ry = r * 0.7071, h = 0.82 * kZ * s;
     final top = g.translate(0, -h);
-    _p.color = Pal.wood;
+    final (Color side, Color shade, Color cap) = switch (src) {
+      SourceKind.river => (Pal.wood, Pal.woodDark.withValues(alpha: 0.55), Pal.woodLight),
+      SourceKind.quarry => (const Color(0xFFBDE4F6), const Color(0x887CB8D8), const Color(0xFFE6F7FF)),
+      SourceKind.grove => (const Color(0xFF7A4A2A), const Color(0x88402410), const Color(0xFFB98454)),
+    };
+    _p.color = side;
     c.drawPath(
         Path()
           ..moveTo(top.dx - r, top.dy)
@@ -825,17 +973,38 @@ class _Renderer {
           ..lineTo(top.dx + r, top.dy)
           ..close(),
         _p);
-    _p.color = Pal.woodDark.withValues(alpha: 0.55);
+    _p.color = shade;
     c.drawRect(Rect.fromLTRB(g.dx + r * 0.3, top.dy, g.dx + r, g.dy), _p);
-    _p.color = Pal.woodLight;
+    if (src == SourceKind.grove) {
+      // sharpened palisade tip
+      _p.color = side;
+      c.drawPath(
+          Path()
+            ..moveTo(top.dx - r, top.dy)
+            ..lineTo(top.dx, top.dy - 0.18 * s)
+            ..lineTo(top.dx + r, top.dy)
+            ..close(),
+          _p);
+      _p.color = cap;
+      c.drawPath(
+          Path()
+            ..moveTo(top.dx - r * 0.4, top.dy - 0.07 * s)
+            ..lineTo(top.dx, top.dy - 0.18 * s)
+            ..lineTo(top.dx + r * 0.2, top.dy - 0.06 * s)
+            ..close(),
+          _p);
+      _p.color = Colors.white;
+      c.drawOval(Rect.fromCenter(center: top.translate(0, -0.13 * s), width: 1.0 * r, height: 0.8 * ry), _p);
+      return;
+    }
+    _p.color = cap;
     c.drawOval(Rect.fromCenter(center: top, width: 2 * r, height: 2 * ry), _p);
     _p.color = Colors.white;
     c.drawOval(Rect.fromCenter(center: top.translate(0, -0.035 * s), width: 1.75 * r, height: 1.5 * ry), _p);
   }
 
   void _gate() {
-    // locked double gate of the chowder plot
-    final y = 4.0;
+    const y = 4.0;
     for (final x0 in [3.75, 4.53]) {
       _box(x0, y - 0.08, 0, x0 + 0.72, y + 0.08, 0.95, Pal.woodLight, Pal.wood, Pal.woodDark);
       _ps.color = Pal.woodDark;
@@ -845,7 +1014,8 @@ class _Renderer {
     final lockC = cam.w2s(4.51, 4.1, 0.5);
     _ps.color = const Color(0xFF9AA3B5);
     _ps.strokeWidth = 0.07 * s;
-    c.drawArc(Rect.fromCenter(center: lockC.translate(0, -0.12 * s), width: 0.28 * s, height: 0.3 * s), math.pi, math.pi, false, _ps);
+    c.drawArc(Rect.fromCenter(center: lockC.translate(0, -0.12 * s), width: 0.28 * s, height: 0.3 * s), math.pi, math.pi,
+        false, _ps);
     _p.color = Pal.gold;
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: lockC, width: 0.36 * s, height: 0.3 * s), Radius.circular(0.06 * s)), _p);
     _p.color = Pal.woodDark;
@@ -898,18 +1068,56 @@ class _Renderer {
         _p.color = Colors.white;
         c.drawOval(Rect.fromCenter(center: g.translate(-0.05 * q, -0.12 * q), width: 1.15 * q, height: 0.6 * q), _p);
       case PropKind.rock:
-        _shadow(g.translate(0.05 * q, 0.03 * q), 0.9 * q, 0.4 * q);
-        _poly([
-          g.translate(-0.4 * q, 0),
-          g.translate(-0.3 * q, -0.35 * q),
-          g.translate(0.05 * q, -0.48 * q),
-          g.translate(0.38 * q, -0.25 * q),
-          g.translate(0.42 * q, 0.02 * q),
-        ], const Color(0xFF8E98AE));
-        _poly([g.translate(0.05 * q, -0.48 * q), g.translate(0.38 * q, -0.25 * q), g.translate(0.42 * q, 0.02 * q), g.translate(0.1 * q, -0.1 * q)],
-            const Color(0xFF6F7890));
+        _rockShape(g, q, const Color(0xFF8E98AE), const Color(0xFF6F7890));
+      case PropKind.boulder:
+        final sb = ((p.size - 0.8) / 0.25).round().clamp(0, 4);
+        final bq = s * (0.8 + sb * 0.25);
+        final w0 = 1.3 * bq, h0 = 1.0 * bq, ax = 0.62 * bq, ay = 0.82 * bq;
+        final img = _sprite('boulder$sb', w0, h0, ax, ay,
+            () => _rockShape(Offset.zero, bq * 1.25, const Color(0xFF8F9BB3), const Color(0xFF6A7590)));
+        _blit(img, g, w0, h0, ax, ay);
+      case PropKind.crystals:
+        _shadow(g, 0.9 * q, 0.4 * q);
+        _crystalCluster(g, q, const Color(0xFF7FD3F5), const Color(0xFF3E9FD0), glow: true);
+      case PropKind.cart:
+        _shadow(g.translate(0.05 * q, 0.05 * q), 1.4 * q, 0.6 * q);
+        for (final wx in [-0.32, 0.32]) {
+          _p.color = const Color(0xFF3B3F52);
+          c.drawCircle(cam.w2s(p.pos.dx + wx, p.pos.dy + 0.36, 0.14), 0.14 * q, _p);
+        }
+        _box(p.pos.dx - 0.5, p.pos.dy - 0.33, 0.12, p.pos.dx + 0.5, p.pos.dy + 0.33, 0.62, const Color(0xFF6C7891),
+            const Color(0xFF59627A), const Color(0xFF474F63));
+        for (var i = 0; i < 3; i++) {
+          _itemS(Item.ore, cam.w2s(p.pos.dx - 0.25 + i * 0.25, p.pos.dy, 0.62), sc: 0.8);
+        }
+      case PropKind.logpile:
+        _shadow(g.translate(0.05 * q, 0.05 * q), 1.5 * q, 0.6 * q);
+        for (var row = 0; row < 3; row++) {
+          for (var i = 0; i < 3 - row; i++) {
+            final sp = cam.w2s(p.pos.dx, p.pos.dy - 0.3 + i * 0.3 + row * 0.15, row * 0.22);
+            _itemS(Item.log, sp, sc: 1.0);
+          }
+        }
         _p.color = Colors.white;
-        c.drawOval(Rect.fromCenter(center: g.translate(-0.08 * q, -0.4 * q), width: 0.5 * q, height: 0.16 * q), _p);
+        c.drawOval(Rect.fromCenter(center: cam.w2s(p.pos.dx, p.pos.dy, 0.68), width: 0.6 * q, height: 0.2 * q), _p);
+      case PropKind.stump:
+        _shadow(g, 0.9 * q, 0.4 * q);
+        _cyl(p.pos.dx, p.pos.dy, 0, 0.35, 0.32 * p.size, Pal.bark, Pal.ring);
+        _ps.color = const Color(0xFFB98454);
+        _ps.strokeWidth = math.max(1, 0.025 * s);
+        c.drawOval(Rect.fromCenter(center: cam.w2s(p.pos.dx, p.pos.dy, 0.35), width: 0.32 * q, height: 0.22 * q), _ps);
+        final hp = cam.w2s(p.pos.dx, p.pos.dy, 0.35);
+        _ps.color = Pal.barkLight;
+        _ps.strokeWidth = 0.06 * s;
+        c.drawLine(hp, hp.translate(0.35 * q, -0.4 * q), _ps);
+        _p.color = const Color(0xFFB8C2D6);
+        c.drawPath(
+            Path()
+              ..moveTo(hp.dx - 0.05 * q, hp.dy - 0.02 * q)
+              ..lineTo(hp.dx + 0.2 * q, hp.dy - 0.18 * q)
+              ..lineTo(hp.dx + 0.12 * q, hp.dy + 0.08 * q)
+              ..close(),
+            _p);
       case PropKind.sign:
         _shadow(g, 0.5 * q, 0.2 * q);
         _p.color = Pal.woodDark;
@@ -920,60 +1128,323 @@ class _Renderer {
         _ps.color = Pal.woodDark;
         _ps.strokeWidth = 0.04 * s;
         c.drawRRect(RRect.fromRectAndRadius(board, Radius.circular(0.08 * q)), _ps);
-        _bowlS(board.center.translate(0, 0.06 * q), sc: 0.8);
+        _itemS(w.region.prodB, board.center.translate(0, 0.08 * q), sc: 0.7);
         _p.color = Colors.white;
         c.drawOval(Rect.fromCenter(center: board.topCenter, width: 0.9 * q, height: 0.14 * q), _p);
     }
   }
 
+  void _rockShape(Offset g, double q, Color light, Color dark) {
+    _shadow(g.translate(0.05 * q, 0.03 * q), 0.9 * q, 0.4 * q);
+    _poly([
+      g.translate(-0.4 * q, 0),
+      g.translate(-0.3 * q, -0.35 * q),
+      g.translate(0.05 * q, -0.48 * q),
+      g.translate(0.38 * q, -0.25 * q),
+      g.translate(0.42 * q, 0.02 * q),
+    ], light);
+    _poly([g.translate(0.05 * q, -0.48 * q), g.translate(0.38 * q, -0.25 * q), g.translate(0.42 * q, 0.02 * q), g.translate(0.1 * q, -0.1 * q)],
+        dark);
+    _p.color = Colors.white;
+    c.drawOval(Rect.fromCenter(center: g.translate(-0.08 * q, -0.4 * q), width: 0.5 * q, height: 0.16 * q), _p);
+  }
+
+  void _prism(Offset base, double ang, double len, double wid, Color light, Color dark) {
+    c.save();
+    c.translate(base.dx, base.dy);
+    c.rotate(ang);
+    _p.color = light;
+    c.drawPath(
+        Path()
+          ..moveTo(-wid, 0)
+          ..lineTo(-wid, -len)
+          ..lineTo(0, -len - wid * 1.3)
+          ..lineTo(0, 0)
+          ..close(),
+        _p);
+    _p.color = dark;
+    c.drawPath(
+        Path()
+          ..moveTo(0, 0)
+          ..lineTo(0, -len - wid * 1.3)
+          ..lineTo(wid, -len)
+          ..lineTo(wid, 0)
+          ..close(),
+        _p);
+    _p.color = Colors.white.withValues(alpha: 0.55);
+    c.drawRect(Rect.fromLTWH(-wid * 0.7, -len * 0.9, wid * 0.25, len * 0.6), _p);
+    c.restore();
+  }
+
+  void _crystalCluster(Offset g, double q, Color light, Color dark, {bool glow = false}) {
+    if (glow) {
+      _p.color = light.withValues(alpha: 0.18 + 0.08 * math.sin(w.time * 3 + g.dx));
+      c.drawCircle(g.translate(0, -0.4 * q), 0.7 * q, _p);
+    }
+    _prism(g.translate(-0.18 * q, 0), -0.45, 0.45 * q, 0.1 * q, light, dark);
+    _prism(g.translate(0.18 * q, 0), 0.5, 0.4 * q, 0.1 * q, light, dark);
+    _prism(g, 0.05, 0.7 * q, 0.13 * q, light, dark);
+  }
+
+  // ----------------------------------------------------------- resource nodes
+  void _node(Node n) {
+    if (src == SourceKind.quarry) {
+      _rockNode(n);
+    } else {
+      _treeNode(n);
+    }
+  }
+
+  void _rockNode(Node n) {
+    final g = cam.w2s(n.pos.dx, n.pos.dy, 0);
+    final fr = w.raid.freeze;
+    if (!n.alive) {
+      _shadow(g, 0.9 * s, 0.4 * s, 0.1);
+      for (var i = 0; i < 4; i++) {
+        final o = Offset((_h1(i + (n.seed * 100).round()) - 0.5) * 0.7 * s, (_h1(i + 50) - 0.5) * 0.25 * s);
+        _p.color = i.isEven ? const Color(0xFF8E98AE) : const Color(0xFF7FD3F5);
+        c.drawOval(Rect.fromCenter(center: g + o, width: 0.22 * s, height: 0.14 * s), _p);
+      }
+      return;
+    }
+    final big = isBig(n.kind), rare = isRare(n.kind);
+    final q = s * _easeOutBack(n.grow) * (big ? 1.3 : 1.0);
+    if (q <= 0.5) return;
+    final o = g.translate(math.sin(w.time * 70) * n.shake * 0.05 * s, 0);
+    final rock = Color.lerp(const Color(0xFF8E98AE), Colors.white, fr * 0.4)!;
+    final rockDark = Color.lerp(const Color(0xFF6A7590), Colors.white, fr * 0.4)!;
+    _rockShape(o, q * 1.05, rock, rockDark);
+    final (Color cl, Color cd) = rare
+        ? (const Color(0xFF7CF7C2), const Color(0xFF2FBF86))
+        : (big ? (const Color(0xFF6FA8F2), const Color(0xFF2F64B8)) : (const Color(0xFF9BE3FA), const Color(0xFF45A8D8)));
+    if (rare) {
+      _p.color = const Color(0xFF7CF7C2).withValues(alpha: 0.22 + 0.1 * math.sin(w.time * 4 + n.seed * 9));
+      c.drawCircle(o.translate(0, -0.45 * q), 0.75 * q, _p);
+    }
+    _prism(o.translate(-0.2 * q, -0.15 * q), -0.5, 0.42 * q, 0.1 * q, cl, cd);
+    _prism(o.translate(0.17 * q, -0.12 * q), 0.45, 0.38 * q, 0.1 * q, cl, cd);
+    _prism(o.translate(0, -0.2 * q), 0.05, 0.62 * q, 0.13 * q, cl, cd);
+    final dmg = 1 - n.hp / n.maxHp;
+    if (dmg > 0.01) {
+      _ps.color = const Color(0xCC2B3550);
+      _ps.strokeWidth = math.max(1, 0.03 * s);
+      final cracks = (dmg * 3).ceil();
+      for (var i = 0; i < cracks; i++) {
+        final a = o.translate((i - 1) * 0.15 * q, -0.15 * q);
+        c.drawPath(
+            Path()
+              ..moveTo(a.dx, a.dy)
+              ..lineTo(a.dx + 0.06 * q, a.dy - 0.12 * q)
+              ..lineTo(a.dx - 0.02 * q, a.dy - 0.22 * q),
+            _ps);
+      }
+    }
+  }
+
+  void _treeNode(Node n) {
+    final g = cam.w2s(n.pos.dx, n.pos.dy, 0);
+    final big = isBig(n.kind), rare = isRare(n.kind);
+    final size = big ? 1.35 : 1.12;
+    final q = s * size;
+    final variant = rare ? 1 : (big ? 2 : 0);
+    final w0 = 1.64 * q, h0 = 2.36 * q, ax = 0.7 * q, ay = 2.02 * q;
+    final img = _sprite('ntree$variant', w0, h0, ax, ay, () {
+      _treeAt(Offset.zero, q, 0.3,
+          needle: rare ? const Color(0xFFE0B23A) : (big ? const Color(0xFF285E52) : null),
+          needleDark: rare ? const Color(0xFFB0841E) : (big ? const Color(0xFF1C463D) : null),
+          shadow: false);
+      // ribbon mark showing that the tree can be chopped
+      _p.color = const Color(0xFFFF8A3D);
+      c.drawRect(Rect.fromLTWH(-0.1 * q, -0.32 * q, 0.2 * q, 0.07 * q), _p);
+    });
+    if (!n.alive) {
+      // stump left behind while the tree falls and regrows
+      _shadow(g, 0.6 * s, 0.28 * s, 0.12);
+      _cyl(n.pos.dx, n.pos.dy, 0, 0.22, 0.17 * size, Pal.bark, Pal.ring);
+      if (n.fall < 1) {
+        final a = 1 - n.fall;
+        c.save();
+        c.translate(g.dx, g.dy - 0.15 * s);
+        c.rotate(n.fall * n.fall * math.pi * 0.5 * n.fallDir);
+        _imgPaint.color = Color.fromRGBO(255, 255, 255, a);
+        _blit(img, Offset.zero, w0, h0, ax, ay);
+        _imgPaint.color = const Color(0xFFFFFFFF);
+        c.restore();
+      }
+      return;
+    }
+    _shadow(g.translate(0.2 * q, 0.04 * q), 1.3 * q, 0.5 * q, 0.13);
+    final gs = _easeOutBack(n.grow);
+    if (gs <= 0.02) return;
+    final sway = math.sin(w.time * 50) * n.shake * 0.07;
+    c.save();
+    c.translate(g.dx, g.dy);
+    c.rotate(sway);
+    c.scale(gs);
+    _blit(img, Offset.zero, w0, h0, ax, ay);
+    c.restore();
+    if (rare) {
+      for (var i = 0; i < 3; i++) {
+        final tw = math.sin(w.time * 4 + i * 2.1 + n.seed * 7);
+        if (tw < 0.3) continue;
+        final p = g.translate((_h1(i + 77) - 0.5) * 1.0 * q, -(0.6 + _h1(i + 88) * 1.2) * q);
+        _p.color = const Color(0xFFFFF3A0).withValues(alpha: (tw - 0.3) * 1.4);
+        c.drawCircle(p, 0.05 * s, _p);
+      }
+    }
+  }
+
   // ----------------------------------------------------------- stations
-  void _grill(Processor pr) {
+  void _workTable(bool stone) {
     _shadow(cam.w2s(4.05, -1.55, 0), 2.6 * s, 1.5 * s, 0.12);
-    _box(3.5, -2.6, 0, 4.5, -0.6, 0.78, Pal.woodLight, Pal.wood, Pal.woodDark);
-    _ps.color = Pal.woodDark.withValues(alpha: 0.5);
-    _ps.strokeWidth = 0.04 * s;
-    c.drawLine(cam.w2s(3.5, -0.6, 0.6), cam.w2s(4.5, -0.6, 0.6), _ps);
-    c.drawLine(cam.w2s(4.5, -0.6, 0.6), cam.w2s(4.5, -2.6, 0.6), _ps);
+    if (stone) {
+      _box(3.5, -2.6, 0, 4.5, -0.6, 0.78, Pal.stoneTop, Pal.stoneLeft, Pal.stoneRight);
+    } else {
+      _box(3.5, -2.6, 0, 4.5, -0.6, 0.78, Pal.woodLight, Pal.wood, Pal.woodDark);
+      _ps.color = Pal.woodDark.withValues(alpha: 0.5);
+      _ps.strokeWidth = 0.04 * s;
+      c.drawLine(cam.w2s(3.5, -0.6, 0.6), cam.w2s(4.5, -0.6, 0.6), _ps);
+      c.drawLine(cam.w2s(4.5, -0.6, 0.6), cam.w2s(4.5, -2.6, 0.6), _ps);
+    }
     _box(3.62, -2.5, 0.78, 4.38, -1.72, 0.81, const Color(0xFFF2DDBB), const Color(0xFFCDB089), const Color(0xFFB89B74));
-    final hot = pr.working != null ? 1.0 : 0.0;
-    _box(3.6, -1.6, 0.78, 4.4, -0.68, 0.86, Color.lerp(Pal.metal, const Color(0xFF5E4A44), hot * 0.4)!, const Color(0xFF2E3242),
-        const Color(0xFF262A38));
-    if (hot > 0) {
-      final pulse = 0.5 + 0.5 * math.sin(w.time * 10);
-      _ps.color = const Color(0xFFFF7A2E).withValues(alpha: 0.5 + 0.3 * pulse);
-      _ps.strokeWidth = 0.05 * s;
-      c.drawLine(cam.w2s(3.6, -0.68, 0.82), cam.w2s(4.4, -0.68, 0.82), _ps);
-      c.drawLine(cam.w2s(4.4, -0.68, 0.82), cam.w2s(4.4, -1.6, 0.82), _ps);
+  }
+
+  void _procA(Processor pr) {
+    final wk = pr.working;
+    final busy = wk != null;
+    switch (src) {
+      case SourceKind.river:
+        _workTable(false);
+        final hot = busy ? 1.0 : 0.0;
+        _box(3.6, -1.6, 0.78, 4.4, -0.68, 0.86, Color.lerp(Pal.metal, const Color(0xFF5E4A44), hot * 0.4)!,
+            const Color(0xFF2E3242), const Color(0xFF262A38));
+        if (busy) {
+          final pulse = 0.5 + 0.5 * math.sin(w.time * 10);
+          _ps.color = const Color(0xFFFF7A2E).withValues(alpha: 0.5 + 0.3 * pulse);
+          _ps.strokeWidth = 0.05 * s;
+          c.drawLine(cam.w2s(3.6, -0.68, 0.82), cam.w2s(4.4, -0.68, 0.82), _ps);
+          c.drawLine(cam.w2s(4.4, -0.68, 0.82), cam.w2s(4.4, -1.6, 0.82), _ps);
+        }
+      case SourceKind.quarry:
+        _workTable(true);
+        // grinding wheel standing on the table
+        final hub = cam.w2s(4.0, -1.15, 1.32);
+        _box(3.9, -1.55, 0.78, 4.1, -1.45, 1.35, const Color(0xFF59627A), const Color(0xFF474F63), const Color(0xFF3B4254));
+        _box(3.9, -0.85, 0.78, 4.1, -0.75, 1.35, const Color(0xFF59627A), const Color(0xFF474F63), const Color(0xFF3B4254));
+        _p.color = const Color(0xFF8E98AE);
+        c.drawOval(Rect.fromCenter(center: hub, width: 0.95 * s, height: 0.95 * s), _p);
+        _p.color = const Color(0xFFB9C2D3);
+        c.drawOval(Rect.fromCenter(center: hub.translate(-0.03 * s, -0.03 * s), width: 0.8 * s, height: 0.8 * s), _p);
+        _ps.color = const Color(0xFF6A7590);
+        _ps.strokeWidth = math.max(1, 0.035 * s);
+        final rot = pr.anim * 14;
+        for (var i = 0; i < 4; i++) {
+          final a = rot + i * math.pi / 4;
+          c.drawLine(hub - Offset(math.cos(a), math.sin(a)) * 0.36 * s, hub + Offset(math.cos(a), math.sin(a)) * 0.36 * s, _ps);
+        }
+        _p.color = const Color(0xFF454B5E);
+        c.drawCircle(hub, 0.08 * s, _p);
+      case SourceKind.grove:
+        _workTable(false);
+        _cyl(4.0, -1.15, 0.78, 1.02, 0.34, Pal.bark, Pal.ring);
+        _ps.color = const Color(0xFFB98454);
+        _ps.strokeWidth = math.max(1, 0.025 * s);
+        c.drawOval(Rect.fromCenter(center: cam.w2s(4.0, -1.15, 1.02), width: 0.36 * s, height: 0.25 * s), _ps);
+        if (!busy) {
+          final hp = cam.w2s(4.05, -1.1, 1.02);
+          _ps.color = Pal.barkLight;
+          _ps.strokeWidth = 0.06 * s;
+          c.drawLine(hp, hp.translate(0.3 * s, -0.42 * s), _ps);
+          _p.color = const Color(0xFFB8C2D6);
+          c.drawPath(
+              Path()
+                ..moveTo(hp.dx - 0.06 * s, hp.dy - 0.03 * s)
+                ..lineTo(hp.dx + 0.18 * s, hp.dy - 0.2 * s)
+                ..lineTo(hp.dx + 0.12 * s, hp.dy + 0.08 * s)
+                ..close(),
+              _p);
+        }
     }
     _pileItems(pr.input);
-    final wk = pr.working;
     if (wk != null) {
-      final sp = cam.w2s(pr.workAt.dx, pr.workAt.dy, pr.workZ);
+      final z = src == SourceKind.quarry ? 1.0 : (src == SourceKind.grove ? 1.04 : pr.workZ);
+      final sp = cam.w2s(pr.workAt.dx, pr.workAt.dy, z);
       if (pr.t < 0.55) {
         final wob = math.sin(pr.anim * 30) * 0.02 * s;
-        _fishS(sp.translate(wob, -0.06 * s), wk, -0.15, cook: pr.t / 0.55 * 0.7, sc: 0.85);
+        if (catOf(wk) == Cat.raw && src == SourceKind.river) {
+          _fishS(sp.translate(wob, -0.06 * s), wk, -0.15, cook: pr.t / 0.55 * 0.7, sc: 0.85);
+        } else {
+          _itemS(wk, sp.translate(wob, 0), sc: 0.8);
+        }
       } else {
         final k = ((pr.t - 0.55) / 0.45).clamp(0.0, 1.0);
         for (var i = 0; i < 3; i++) {
-          _cakeS(sp.translate((i - 1) * 0.3 * s, (i == 1 ? 0.05 : -0.02) * s), sc: 0.5 + 0.5 * k);
+          _itemS(pr.product, sp.translate((i - 1) * 0.3 * s, (i == 1 ? 0.05 : -0.02) * s), sc: 0.4 + 0.45 * k);
         }
       }
-      final ring = cam.w2s(pr.pos.dx, pr.pos.dy, 2.6);
+      final ring = cam.w2s(pr.pos.dx, pr.pos.dy, 2.7);
       _late.add(() => _progressRing(ring, pr.t, pr.product));
+    }
+  }
+
+  void _procB(Processor pr) {
+    switch (src) {
+      case SourceKind.river:
+        _pot(pr);
+      case SourceKind.quarry:
+        _forge(pr);
+      case SourceKind.grove:
+        _workbench(pr);
+    }
+    if (pr.working != null) {
+      final ring = cam.w2s(pr.pos.dx, pr.pos.dy, 3.0);
+      _late.add(() => _progressRing(ring, pr.t, pr.product));
+    }
+  }
+
+  void _stoneRing(Offset p, bool front) {
+    for (var i = 0; i < 11; i++) {
+      final a = i / 11 * math.pi * 2 + 0.3;
+      final isFront = math.sin(a) + math.cos(a) > 0;
+      if (isFront != front) continue;
+      final sp = cam.w2s(p.dx + math.cos(a) * 0.95, p.dy + math.sin(a) * 0.95, 0);
+      _p.color = front ? const Color(0xFF9EA8BE) : const Color(0xFF8E98AE);
+      c.drawOval(Rect.fromCenter(center: sp, width: 0.38 * s, height: 0.26 * s), _p);
+      if (front) {
+        _p.color = Colors.white.withValues(alpha: 0.85);
+        c.drawOval(Rect.fromCenter(center: sp.translate(0, -0.06 * s), width: 0.24 * s, height: 0.1 * s), _p);
+      }
+    }
+  }
+
+  void _flames(Offset base, int n, double spread, double height) {
+    for (var i = 0; i < n; i++) {
+      final fx = (i - (n - 1) / 2) * spread;
+      final fl = (height + height * 0.35 * math.sin(w.time * 14 + i * 2.1)) * s;
+      final fb = base.translate(fx, 0);
+      _p.color = const Color(0xFFFF7A2E);
+      c.drawPath(
+          Path()
+            ..moveTo(fb.dx - 0.12 * s, fb.dy)
+            ..quadraticBezierTo(fb.dx - 0.1 * s, fb.dy - fl * 0.6, fb.dx, fb.dy - fl)
+            ..quadraticBezierTo(fb.dx + 0.1 * s, fb.dy - fl * 0.6, fb.dx + 0.12 * s, fb.dy)
+            ..close(),
+          _p);
+      _p.color = const Color(0xFFFFD447);
+      c.drawPath(
+          Path()
+            ..moveTo(fb.dx - 0.06 * s, fb.dy)
+            ..quadraticBezierTo(fb.dx - 0.05 * s, fb.dy - fl * 0.35, fb.dx, fb.dy - fl * 0.6)
+            ..quadraticBezierTo(fb.dx + 0.05 * s, fb.dy - fl * 0.35, fb.dx + 0.06 * s, fb.dy)
+            ..close(),
+          _p);
     }
   }
 
   void _pot(Processor pr) {
     final p = pr.pos;
     _shadow(cam.w2s(p.dx, p.dy, 0), 2.4 * s, 1.3 * s, 0.14);
-    for (var i = 0; i < 11; i++) {
-      final a = i / 11 * math.pi * 2 + 0.3;
-      final sp = cam.w2s(p.dx + math.cos(a) * 0.95, p.dy + math.sin(a) * 0.95, 0);
-      if (math.sin(a) + math.cos(a) > 0) continue; // back half first
-      _p.color = const Color(0xFF8E98AE);
-      c.drawOval(Rect.fromCenter(center: sp, width: 0.36 * s, height: 0.24 * s), _p);
-    }
-    // logs & fire
+    _stoneRing(p, false);
     final fireOn = pr.working != null;
     final base = cam.w2s(p.dx, p.dy, 0.05);
     _ps.color = const Color(0xFF6B3F22);
@@ -984,8 +1455,7 @@ class _Renderer {
     final top = cam.w2s(p.dx, p.dy, 1.02);
     _p.color = const Color(0xFF2B2F3D);
     c.drawOval(Rect.fromCenter(center: top, width: 1.38 * s, height: 0.97 * s), _p);
-    final soup = Color.lerp(const Color(0xFFE9D3A6), const Color(0xFFF7E3B5), fireOn ? 1 : 0)!;
-    _p.color = soup;
+    _p.color = Color.lerp(const Color(0xFFE9D3A6), const Color(0xFFF7E3B5), fireOn ? 1 : 0)!;
     c.drawOval(Rect.fromCenter(center: top.translate(0, 0.03 * s), width: 1.22 * s, height: 0.84 * s), _p);
     if (fireOn) {
       for (var i = 0; i < 4; i++) {
@@ -999,40 +1469,85 @@ class _Renderer {
       c.drawCircle(top.translate(-0.2 * s, 0.08 * s), 0.07 * s, _p);
       _p.color = const Color(0xFF43A047);
       c.drawCircle(top.translate(0.22 * s, -0.04 * s), 0.06 * s, _p);
-      // flames peeking out at the front
-      for (var i = 0; i < 4; i++) {
-        final fx = (i - 1.5) * 0.28 * s;
-        final fl = (0.32 + 0.12 * math.sin(w.time * 14 + i * 2.1)) * s;
-        final fb = base.translate(fx, 0.2 * s);
-        _p.color = const Color(0xFFFF7A2E);
-        c.drawPath(
-            Path()
-              ..moveTo(fb.dx - 0.12 * s, fb.dy)
-              ..quadraticBezierTo(fb.dx - 0.1 * s, fb.dy - fl * 0.6, fb.dx, fb.dy - fl)
-              ..quadraticBezierTo(fb.dx + 0.1 * s, fb.dy - fl * 0.6, fb.dx + 0.12 * s, fb.dy)
-              ..close(),
-            _p);
-        _p.color = const Color(0xFFFFD447);
-        c.drawPath(
-            Path()
-              ..moveTo(fb.dx - 0.06 * s, fb.dy)
-              ..quadraticBezierTo(fb.dx - 0.05 * s, fb.dy - fl * 0.35, fb.dx, fb.dy - fl * 0.6)
-              ..quadraticBezierTo(fb.dx + 0.05 * s, fb.dy - fl * 0.35, fb.dx + 0.06 * s, fb.dy)
-              ..close(),
-            _p);
-      }
-      final ring = cam.w2s(p.dx, p.dy, 2.9);
-      _late.add(() => _progressRing(ring, pr.t, pr.product));
+      _flames(base.translate(0, 0.2 * s), 4, 0.28 * s, 0.32);
     }
-    for (var i = 0; i < 11; i++) {
-      final a = i / 11 * math.pi * 2 + 0.3;
-      if (math.sin(a) + math.cos(a) <= 0) continue;
-      final sp = cam.w2s(p.dx + math.cos(a) * 0.95, p.dy + math.sin(a) * 0.95, 0);
-      _p.color = const Color(0xFF9EA8BE);
-      c.drawOval(Rect.fromCenter(center: sp, width: 0.38 * s, height: 0.26 * s), _p);
-      _p.color = Colors.white.withValues(alpha: 0.85);
-      c.drawOval(Rect.fromCenter(center: sp.translate(0, -0.06 * s), width: 0.24 * s, height: 0.1 * s), _p);
+    _stoneRing(p, true);
+  }
+
+  void _forge(Processor pr) {
+    final p = pr.pos;
+    final busy = pr.working != null;
+    _shadow(cam.w2s(p.dx, p.dy, 0), 2.6 * s, 1.4 * s, 0.14);
+    _box(p.dx - 0.7, p.dy - 0.7, 0, p.dx + 0.7, p.dy + 0.7, 1.25, const Color(0xFF8E98AE), const Color(0xFF6F7890),
+        const Color(0xFF5B6377));
+    // bricks
+    _ps.color = const Color(0x55394055);
+    _ps.strokeWidth = math.max(1, 0.025 * s);
+    for (var z = 0.3; z < 1.2; z += 0.3) {
+      c.drawLine(cam.w2s(p.dx - 0.7, p.dy + 0.7, z), cam.w2s(p.dx + 0.7, p.dy + 0.7, z), _ps);
+      c.drawLine(cam.w2s(p.dx + 0.7, p.dy + 0.7, z), cam.w2s(p.dx + 0.7, p.dy - 0.7, z), _ps);
     }
+    // glowing mouth on the front faces
+    final glow = busy ? 0.75 + 0.25 * math.sin(w.time * 9) : 0.25;
+    final mouth = [
+      cam.w2s(p.dx - 0.35, p.dy + 0.7, 0.15),
+      cam.w2s(p.dx + 0.35, p.dy + 0.7, 0.15),
+      cam.w2s(p.dx + 0.35, p.dy + 0.7, 0.7),
+      cam.w2s(p.dx, p.dy + 0.7, 0.85),
+      cam.w2s(p.dx - 0.35, p.dy + 0.7, 0.7),
+    ];
+    _poly(mouth, const Color(0xFF2B2F3D));
+    var cx = 0.0, cy = 0.0;
+    for (final o in mouth) {
+      cx += o.dx / mouth.length;
+      cy += o.dy / mouth.length;
+    }
+    final mc = Offset(cx, cy);
+    _poly(mouth.map((o) => mc + (o - mc) * 0.72).toList(),
+        Color.lerp(const Color(0xFF7A2E10), const Color(0xFFFFB347), glow)!.withValues(alpha: 0.95));
+    if (busy) {
+      final m = cam.w2s(p.dx, p.dy + 0.7, 0.3);
+      _flames(m, 3, 0.18 * s, 0.25);
+      _p.color = const Color(0xFFFFB347).withValues(alpha: 0.18);
+      c.drawCircle(m, 0.9 * s, _p);
+    }
+    _cyl(p.dx + 0.35, p.dy - 0.35, 1.25, 2.3, 0.2, const Color(0xFF59627A), const Color(0xFF2B2F3D));
+    _p.color = Colors.white;
+    c.drawOval(Rect.fromCenter(center: cam.w2s(p.dx - 0.2, p.dy + 0.1, 1.25), width: 0.9 * s, height: 0.4 * s), _p);
+    // finished lamps glowing on top
+    _itemS(Item.lamp, cam.w2s(p.dx - 0.3, p.dy + 0.25, 1.25), sc: 0.7);
+  }
+
+  void _workbench(Processor pr) {
+    final p = pr.pos;
+    final busy = pr.working != null;
+    _shadow(cam.w2s(p.dx, p.dy, 0), 2.6 * s, 1.4 * s, 0.14);
+    for (final o in const [Offset(-0.55, -0.55), Offset(0.55, -0.55), Offset(-0.55, 0.55), Offset(0.55, 0.55)]) {
+      _box(p.dx + o.dx - 0.07, p.dy + o.dy - 0.07, 0, p.dx + o.dx + 0.07, p.dy + o.dy + 0.07, 0.8, Pal.woodLight, Pal.wood,
+          Pal.woodDark);
+    }
+    _box(p.dx - 0.7, p.dy - 0.7, 0.72, p.dx + 0.7, p.dy + 0.7, 0.9, Pal.woodLight, Pal.wood, Pal.woodDark);
+    _ps.color = Pal.woodDark.withValues(alpha: 0.5);
+    _ps.strokeWidth = math.max(1, 0.03 * s);
+    for (var x = -0.4; x <= 0.45; x += 0.4) {
+      c.drawLine(cam.w2s(p.dx + x, p.dy - 0.7, 0.9), cam.w2s(p.dx + x, p.dy + 0.7, 0.9), _ps);
+    }
+    // a sled being built
+    final k = busy ? (0.4 + 0.6 * pr.t) : 0.35;
+    _sledS(cam.w2s(p.dx + 0.1, p.dy + 0.1, 0.92), sc: 1.4 * k + 0.2);
+    // saw
+    final sp = cam.w2s(p.dx - 0.45, p.dy - 0.3, 0.92);
+    _p.color = const Color(0xFFB8C2D6);
+    c.drawPath(
+        Path()
+          ..moveTo(sp.dx, sp.dy)
+          ..lineTo(sp.dx + 0.55 * s, sp.dy - 0.1 * s)
+          ..lineTo(sp.dx + 0.5 * s, sp.dy + 0.08 * s)
+          ..lineTo(sp.dx, sp.dy + 0.12 * s)
+          ..close(),
+        _p);
+    _p.color = const Color(0xFFE5484D);
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(sp.dx - 0.2 * s, sp.dy - 0.04 * s, 0.22 * s, 0.18 * s), Radius.circular(0.04 * s)), _p);
   }
 
   void _crate(Pile pile) {
@@ -1048,7 +1563,6 @@ class _Renderer {
   void _counter(Counter k) {
     final x0 = k.pos.dx - k.hx, x1 = k.pos.dx + k.hx, y0 = k.pos.dy - k.hy, y1 = k.pos.dy + k.hy;
     final alongX = k.hx > k.hy;
-    // awning on the side that is farther from the camera
     final pA = alongX ? Offset(x0 + 0.08, y0 + 0.06) : Offset(x0 + 0.06, y0 + 0.08);
     final pB = alongX ? Offset(x1 - 0.08, y0 + 0.06) : Offset(x0 + 0.06, y1 - 0.08);
     for (final p in [pA, pB]) {
@@ -1059,25 +1573,21 @@ class _Renderer {
     for (var i = 0; i < stripes; i++) {
       final t0 = i / stripes, t1 = (i + 1) / stripes;
       final a = Offset.lerp(pA, pB, t0)!, b = Offset.lerp(pA, pB, t1)!;
-      final pts = [
+      _poly([
         cam.w2s(a.dx, a.dy, 2.4),
         cam.w2s(b.dx, b.dy, 2.4),
         cam.w2s(b.dx + out.dx, b.dy + out.dy, 2.05),
         cam.w2s(a.dx + out.dx, a.dy + out.dy, 2.05),
-      ];
-      _poly(pts, i.isEven ? k.canopy : Colors.white);
+      ], i.isEven ? k.canopy : Colors.white);
     }
     for (var i = 0; i < stripes; i++) {
       final t = (i + 0.5) / stripes;
       final m = Offset.lerp(pA, pB, t)! + out;
-      final sp = cam.w2s(m.dx, m.dy, 2.05);
       _p.color = i.isEven ? k.canopy : Colors.white;
-      c.drawCircle(sp.translate(0, 0.02 * s), 0.11 * s, _p);
+      c.drawCircle(cam.w2s(m.dx, m.dy, 2.05).translate(0, 0.02 * s), 0.11 * s, _p);
     }
-    // counter body
     _shadow(cam.w2s(k.pos.dx + 0.1, k.pos.dy + 0.1, 0), (k.hx + k.hy) * 2.0 * s, (k.hx + k.hy) * 1.0 * s, 0.12);
     _box(x0, y0, 0, x1, y1, 0.9, Pal.woodLight, Pal.wood, Pal.woodDark);
-    // colourful front panel
     if (alongX) {
       _poly([cam.w2s(x0 + 0.1, y1, 0.15), cam.w2s(x1 - 0.1, y1, 0.15), cam.w2s(x1 - 0.1, y1, 0.75), cam.w2s(x0 + 0.1, y1, 0.75)],
           darken(k.canopy, 0.1));
@@ -1115,13 +1625,13 @@ class _Renderer {
         var sp = cam.w2s(xy.dx, xy.dy, p.slotZ(i));
         if (i ~/ p.cols == topRow) sp = sp.translate(0, -p.bounce * 0.06 * s);
         final it = p.items[i];
-        _itemS(it, sp, ang: catOf(it) == Cat.fish ? (_h1(i + 31) - 0.5) * 0.25 : 0);
+        _itemS(it, sp, ang: catOf(it) == Cat.raw ? (_h1(i + 31) - 0.5) * 0.25 : 0);
       }
     }
   }
 
   void _cash(CashPile cp) {
-    final n = math.min(48, (cp.amount / 4).ceil());
+    final n = math.min(48, (cp.amount / (4 * w.mul)).ceil());
     if (n <= 0) return;
     const g = 0.27;
     final b = cp.bounce;
@@ -1129,8 +1639,7 @@ class _Renderer {
       final ox = (col % 3 - 1) * g, oy = (col ~/ 3 - 1) * g;
       for (var i = col; i < n; i += 9) {
         final z = 0.03 + (i ~/ 9) * 0.07;
-        final sp = cam.w2s(cp.at.dx + ox, cp.at.dy + oy, z).translate(0, -b * 0.05 * s);
-        _coinS(sp);
+        _coinS(cam.w2s(cp.at.dx + ox, cp.at.dy + oy, z).translate(0, -b * 0.05 * s));
       }
     }
   }
@@ -1169,8 +1678,20 @@ class _Renderer {
     c.drawCircle(base.translate(-0.06 * s, -0.07 * s), 0.1 * s * sc, _p);
   }
 
+  // ----------------------------------------------------------- landmarks
+  void _landmark() {
+    switch (src) {
+      case SourceKind.river:
+        _lighthouse();
+      case SourceKind.quarry:
+        _spire();
+      case SourceKind.grove:
+        _hearth();
+    }
+  }
+
   void _lighthouse() {
-    final p = lighthousePos;
+    const p = landmarkPos;
     _shadow(cam.w2s(p.dx + 0.4, p.dy + 0.4, 0), 2.4 * s, 1.0 * s, 0.14);
     _cyl(p.dx, p.dy, 0, 0.45, 0.9, const Color(0xFF8E98AE), const Color(0xFFC6CDDA));
     const bands = 7;
@@ -1181,9 +1702,9 @@ class _Renderer {
           i.isEven ? const Color(0xFFF07075) : Colors.white,
           r1: r1);
     }
-    final lz = 0.45 + bands * 0.55;
+    const lz = 0.45 + bands * 0.55;
     _cyl(p.dx, p.dy, lz, lz + 0.1, 0.62, const Color(0xFF3B3F52), const Color(0xFF59627A));
-    final glow = 0.8 + 0.2 * math.sin(w.lighthouseT * 4);
+    final glow = 0.8 + 0.2 * math.sin(w.landmarkT * 4);
     final lamp = cam.w2s(p.dx, p.dy, lz + 0.42);
     _p.color = const Color(0xFFFFE28A).withValues(alpha: 0.3 * glow);
     c.drawCircle(lamp, 1.1 * s, _p);
@@ -1195,22 +1716,77 @@ class _Renderer {
     c.drawOval(Rect.fromCenter(center: roofB, width: 1.1 * s, height: 0.4 * s), _p);
     _p.color = Pal.gold;
     c.drawCircle(roofT, 0.08 * s, _p);
-    // rotating beam
-    _late.add(() {
-      final ang = w.lighthouseT * 0.9;
+    _late.add(() => _beams(lamp, 1, const Color(0x66FFF2B0)));
+  }
+
+  void _beams(Offset from, int n, Color color) {
+    for (var i = 0; i < n; i++) {
+      final ang = w.landmarkT * 0.9 + i * math.pi * 2 / n;
       final dir = Offset(math.cos(ang), math.sin(ang) * 0.55);
       final perp = Offset(-dir.dy, dir.dx);
-      final far = lamp + dir * 7 * s;
-      final paint = Paint()
-        ..shader = ui.Gradient.linear(lamp, far, [const Color(0x66FFF2B0), const Color(0x00FFF2B0)]);
+      final far = from + dir * 7 * s;
+      final paint = Paint()..shader = ui.Gradient.linear(from, far, [color, color.withValues(alpha: 0)]);
       c.drawPath(
           Path()
-            ..moveTo(lamp.dx, lamp.dy)
+            ..moveTo(from.dx, from.dy)
             ..lineTo(far.dx + perp.dx * 1.4 * s, far.dy + perp.dy * 1.4 * s)
             ..lineTo(far.dx - perp.dx * 1.4 * s, far.dy - perp.dy * 1.4 * s)
             ..close(),
           paint);
-    });
+    }
+  }
+
+  void _spire() {
+    const p = landmarkPos;
+    final t = w.landmarkT;
+    _shadow(cam.w2s(p.dx + 0.4, p.dy + 0.4, 0), 2.4 * s, 1.0 * s, 0.14);
+    _cyl(p.dx, p.dy, 0, 0.5, 0.95, const Color(0xFF8E98AE), const Color(0xFFC6CDDA));
+    final base = cam.w2s(p.dx, p.dy, 0.5);
+    final glow = 0.75 + 0.25 * math.sin(t * 3);
+    _p.color = const Color(0xFF7FE7FF).withValues(alpha: 0.22 * glow);
+    c.drawCircle(base.translate(0, -2.2 * s), 2.0 * s, _p);
+    final h = 4.6 * s, wd = 0.62 * s;
+    final tip = base.translate(0, -h);
+    _poly([base.translate(-wd, 0), base.translate(-wd * 0.6, -h * 0.82), tip, base.translate(0, 0.12 * s)], const Color(0xFFB8F0FF));
+    _poly([base.translate(0, 0.12 * s), tip, base.translate(wd * 0.6, -h * 0.82), base.translate(wd, 0)], const Color(0xFF55BDE8));
+    _poly([base.translate(-wd * 0.25, -0.2 * s), base.translate(-wd * 0.15, -h * 0.7), tip, base.translate(0, -0.2 * s)],
+        Colors.white.withValues(alpha: 0.45));
+    _crystalCluster(base.translate(-0.55 * s, 0.1 * s), s * 0.9, const Color(0xFF9BE3FA), const Color(0xFF45A8D8));
+    _crystalCluster(base.translate(0.6 * s, 0.15 * s), s * 0.8, const Color(0xFF7CF7C2), const Color(0xFF2FBF86));
+    for (var i = 0; i < 5; i++) {
+      final a = t * 0.8 + i * math.pi * 2 / 5;
+      final o = Offset(math.cos(a) * 1.1 * s, math.sin(a) * 0.45 * s - (2.6 + math.sin(t * 2 + i) * 0.3) * s);
+      final sp = base + o;
+      _poly([sp.translate(0, -0.18 * s), sp.translate(0.1 * s, 0), sp.translate(0, 0.18 * s), sp.translate(-0.1 * s, 0)],
+          i.isEven ? const Color(0xFFB8F0FF) : const Color(0xFF7CF7C2));
+    }
+    _late.add(() => _beams(tip.translate(0, 0.3 * s), 3, const Color(0x5590E8FF)));
+  }
+
+  void _hearth() {
+    const p = landmarkPos;
+    final t = w.landmarkT;
+    _shadow(cam.w2s(p.dx, p.dy, 0), 2.6 * s, 1.3 * s, 0.14);
+    final base = cam.w2s(p.dx, p.dy, 0.1);
+    _p.color = const Color(0xFFFFB347).withValues(alpha: 0.2 + 0.06 * math.sin(t * 5));
+    c.drawCircle(base.translate(0, -1.2 * s), 2.4 * s, _p);
+    _stoneRing(p, false);
+    for (var i = 0; i < 6; i++) {
+      final a = i / 6 * math.pi;
+      final d = Offset(math.cos(a), math.sin(a) * 0.5) * 0.75 * s;
+      _ps.color = i.isEven ? Pal.bark : Pal.barkLight;
+      _ps.strokeWidth = 0.22 * s;
+      c.drawLine(base - d, base + d - Offset(0, 0.5 * s), _ps);
+    }
+    _flames(base.translate(0, -0.1 * s), 5, 0.26 * s, 1.0);
+    _flames(base.translate(0, -0.2 * s), 3, 0.22 * s, 1.5);
+    for (var i = 0; i < 10; i++) {
+      final ph = (t * 0.6 + _h1(i + 600)) % 1.0;
+      final ep = base.translate((_h1(i + 610) - 0.5) * 1.2 * s + math.sin(t * 2 + i) * 0.15 * s, -(0.8 + ph * 3.0) * s);
+      _p.color = const Color(0xFFFFB347).withValues(alpha: 1 - ph);
+      c.drawCircle(ep, 0.05 * s * (1 - ph * 0.5), _p);
+    }
+    _stoneRing(p, true);
   }
 
   // ----------------------------------------------------------- characters
@@ -1243,12 +1819,14 @@ class _Renderer {
     final stackFirst = a.carry.isNotEmpty && (a.stackPos.dx + a.stackPos.dy) < (a.pos.dx + a.pos.dy);
     if (stackFirst) _stack(a, z);
     var action = a.action;
-    var tool = a.look.tool ? 1 : 0;
-    if (a.look.hatKind == 1) {
-      // chefs & cooks animate while their station is busy
-      final pr = w.processors.where((p) => identical(p.chef, a)).firstOrNull;
-      if (pr != null && pr.working != null) action = (math.sin(pr.anim * 14) * 0.5 + 0.5);
-      tool = 2;
+    var tool = a.look.tool;
+    if (identical(a, w.player) && !w.isRiver && a.action > 0) {
+      tool = src == SourceKind.quarry ? 3 : 4;
+    }
+    for (final pr in w.processors) {
+      if (identical(pr.chef, a)) {
+        action = pr.working != null ? (math.sin(pr.anim * 14) * 0.5 + 0.5) : 0;
+      }
     }
     _person(a.pos, z, a.facing, a.walk, a.move, a.look,
         sc: sc, action: action, carrying: a.carry.isNotEmpty || a.inbound.isNotEmpty, tool: tool);
@@ -1259,11 +1837,13 @@ class _Renderer {
     if (a.carry.isEmpty) return;
     final base = a.stackPos;
     final sv = cam.worldDirToScreen(a.vel);
-    final h = catH(catOf(a.carry.first));
+    var zz = z + 0.55;
     for (var i = 0; i < a.carry.length; i++) {
-      final sp = cam.w2s(base.dx, base.dy, z + 0.55 + i * h);
+      final sp = cam.w2s(base.dx, base.dy, zz);
+      zz += itemH(a.carry[i]);
       final lag = i * i * 0.0011;
-      _itemS(a.carry[i], sp.translate(-sv.dx * lag * s * 0.12, 0), ang: catOf(a.carry[i]) == Cat.fish ? (_h1(i + 7) - 0.5) * 0.2 : 0);
+      _itemS(a.carry[i], sp.translate(-sv.dx * lag * s * 0.12, 0),
+          ang: catOf(a.carry[i]) == Cat.raw ? (_h1(i + 7) - 0.5) * 0.2 : 0);
     }
   }
 
@@ -1298,8 +1878,7 @@ class _Renderer {
               Radius.circular(0.1 * q)),
           _p);
     }
-    // harpoon held at the side (behind the body when facing away)
-    if (tool == 1 && !front) _harpoonTool(f, q, fx, action);
+    if (!front && tool > 0) _tool(tool, f, q, fx, action);
     final bc = f.translate(0, -0.64 * q);
     _p.color = lk.coatDark;
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: bc, width: 0.84 * q, height: 0.86 * q), Radius.circular(0.38 * q)), _p);
@@ -1323,7 +1902,8 @@ class _Renderer {
       } else {
         final up = action * 0.3 * q;
         c.drawOval(Rect.fromCenter(center: f.translate(-0.44 * q, -0.6 * q + sw * 0.07 * q), width: 0.21 * q, height: 0.42 * q), _p);
-        c.drawOval(Rect.fromCenter(center: f.translate(0.44 * q + fx * 0.05 * q, -0.62 * q - sw * 0.07 * q - up), width: 0.21 * q, height: 0.42 * q),
+        c.drawOval(
+            Rect.fromCenter(center: f.translate(0.44 * q + fx * 0.05 * q, -0.62 * q - sw * 0.07 * q - up), width: 0.21 * q, height: 0.42 * q),
             _p);
       }
     }
@@ -1346,7 +1926,6 @@ class _Renderer {
         _p.color = lk.trim;
         c.drawCircle(hc.translate(fx * 0.04 * q, 0.03 * q), 0.35 * q, _p);
       } else {
-        // back of the hood: a seam, soft shading and a little fur rim at the bottom
         _p.color = lk.coatDark.withValues(alpha: 0.55);
         c.drawOval(Rect.fromCenter(center: hc.translate(0.08 * q, 0.1 * q), width: 0.62 * q, height: 0.6 * q), _p);
         _ps.color = lk.coatDark;
@@ -1399,52 +1978,149 @@ class _Renderer {
             _p);
         _p.color = lighten(lk.hat, 0.25);
         c.drawOval(Rect.fromCenter(center: hc.translate(0, -0.41 * q), width: 0.6 * q, height: 0.18 * q), _p);
+      case 4:
+        final top = hc.translate(0, -0.1 * q);
+        _p.color = lk.hat;
+        c.drawArc(Rect.fromCenter(center: top, width: 0.74 * q, height: 0.66 * q), math.pi, math.pi, true, _p);
+        _p.color = darken(lk.hat, 0.2);
+        c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: top, width: 0.86 * q, height: 0.12 * q), Radius.circular(0.06 * q)), _p);
+        if (front) {
+          final lamp = top.translate(fx * 0.12 * q, -0.18 * q);
+          _p.color = const Color(0xFFFFF3B0).withValues(alpha: 0.35);
+          c.drawCircle(lamp, 0.18 * q, _p);
+          _p.color = const Color(0xFFFFF3B0);
+          c.drawCircle(lamp, 0.08 * q, _p);
+        }
       default:
         break;
     }
-    if (tool == 1 && front) _harpoonTool(f, q, fx, action);
-    if (tool == 2) {
-      final hand = f.translate(0.32 * q + fx * 0.1 * q, -0.7 * q - action * 0.18 * q);
-      _ps.color = const Color(0xFF8D99AE);
-      _ps.strokeWidth = 0.07 * q;
-      c.drawLine(hand, hand.translate(0.25 * q, 0.12 * q + action * 0.1 * q), _ps);
-      _p.color = const Color(0xFFB8C2D6);
-      c.drawOval(Rect.fromCenter(center: hand.translate(0.3 * q, 0.15 * q + action * 0.1 * q), width: 0.2 * q, height: 0.1 * q), _p);
+    if (front && tool > 0) _tool(tool, f, q, fx, action);
+  }
+
+  /// Hand tools: 1 harpoon, 2 ladle, 3 pickaxe, 4 axe, 5 hammer, 6 coin bag.
+  void _tool(int tool, Offset f, double q, double fx, double action) {
+    final side = fx >= 0 ? 1.0 : -1.0;
+    switch (tool) {
+      case 1:
+        final b = f.translate(side * 0.5 * q, -0.35 * q);
+        final t = f.translate(side * (0.5 + action * 0.25) * q, -(1.75 + action * 0.1) * q);
+        _ps.color = const Color(0xFF8A5A3B);
+        _ps.strokeWidth = 0.07 * q;
+        c.drawLine(b, t, _ps);
+        _p.color = const Color(0xFFC9D3E3);
+        c.drawPath(
+            Path()
+              ..moveTo(t.dx, t.dy - 0.22 * q)
+              ..lineTo(t.dx - 0.08 * q, t.dy + 0.02 * q)
+              ..lineTo(t.dx + 0.08 * q, t.dy + 0.02 * q)
+              ..close(),
+            _p);
+      case 2:
+        final hand = f.translate(0.32 * q + fx * 0.1 * q, -0.7 * q - action * 0.18 * q);
+        _ps.color = const Color(0xFF8D99AE);
+        _ps.strokeWidth = 0.07 * q;
+        c.drawLine(hand, hand.translate(0.25 * q, 0.12 * q + action * 0.1 * q), _ps);
+        _p.color = const Color(0xFFB8C2D6);
+        c.drawOval(Rect.fromCenter(center: hand.translate(0.3 * q, 0.15 * q + action * 0.1 * q), width: 0.2 * q, height: 0.1 * q), _p);
+      case 3 || 4 || 5:
+        final pivot = f.translate(side * 0.42 * q, -0.72 * q);
+        final ang = side * (-0.35 - 1.6 * action + 0.9 * (1 - action));
+        final dir = Offset(math.sin(ang), -math.cos(ang));
+        final top = pivot + dir * 0.78 * q;
+        _ps.color = const Color(0xFF8A5A3B);
+        _ps.strokeWidth = 0.08 * q;
+        c.drawLine(pivot - dir * 0.08 * q, top, _ps);
+        final perp = Offset(-dir.dy, dir.dx);
+        _p.color = const Color(0xFFB8C2D6);
+        if (tool == 3) {
+          _ps.color = const Color(0xFF9AA5BA);
+          _ps.strokeWidth = 0.09 * q;
+          c.drawPath(
+              Path()
+                ..moveTo(top.dx - perp.dx * 0.32 * q + dir.dx * -0.05 * q, top.dy - perp.dy * 0.32 * q + dir.dy * -0.05 * q)
+                ..quadraticBezierTo(top.dx + dir.dx * 0.1 * q, top.dy + dir.dy * 0.1 * q, top.dx + perp.dx * 0.32 * q - dir.dx * 0.05 * q,
+                    top.dy + perp.dy * 0.32 * q - dir.dy * 0.05 * q),
+              _ps);
+        } else if (tool == 4) {
+          c.drawPath(
+              Path()
+                ..moveTo(top.dx - dir.dx * 0.05 * q, top.dy - dir.dy * 0.05 * q)
+                ..lineTo(top.dx + perp.dx * side * 0.26 * q + dir.dx * 0.08 * q, top.dy + perp.dy * side * 0.26 * q + dir.dy * 0.08 * q)
+                ..lineTo(top.dx + perp.dx * side * 0.26 * q - dir.dx * 0.22 * q, top.dy + perp.dy * side * 0.26 * q - dir.dy * 0.22 * q)
+                ..lineTo(top.dx - dir.dx * 0.22 * q, top.dy - dir.dy * 0.22 * q)
+                ..close(),
+              _p);
+        } else {
+          _p.color = const Color(0xFF6B7591);
+          c.drawPath(
+              Path()
+                ..moveTo(top.dx - perp.dx * 0.16 * q, top.dy - perp.dy * 0.16 * q)
+                ..lineTo(top.dx + perp.dx * 0.16 * q, top.dy + perp.dy * 0.16 * q)
+                ..lineTo(top.dx + perp.dx * 0.16 * q - dir.dx * 0.16 * q, top.dy + perp.dy * 0.16 * q - dir.dy * 0.16 * q)
+                ..lineTo(top.dx - perp.dx * 0.16 * q - dir.dx * 0.16 * q, top.dy - perp.dy * 0.16 * q - dir.dy * 0.16 * q)
+                ..close(),
+              _p);
+        }
+      case 6:
+        final bag = f.translate(side * 0.5 * q, -0.45 * q - action * 0.1 * q);
+        _p.color = const Color(0xFF8A5A3B);
+        c.drawOval(Rect.fromCenter(center: bag, width: 0.42 * q, height: 0.46 * q), _p);
+        _p.color = const Color(0xFF6B4226);
+        c.drawRect(Rect.fromCenter(center: bag.translate(0, -0.22 * q), width: 0.16 * q, height: 0.08 * q), _p);
+        _coinIcon(bag.translate(0, 0.03 * q), 0.1 * q);
     }
   }
 
-  void _harpoonTool(Offset f, double q, double fx, double action) {
-    final side = fx >= 0 ? 1.0 : -1.0;
-    final b = f.translate(side * 0.5 * q, -0.35 * q);
-    final t = f.translate(side * (0.5 + action * 0.25) * q, -(1.75 + action * 0.1) * q);
-    _ps.color = const Color(0xFF8A5A3B);
-    _ps.strokeWidth = 0.07 * q;
-    c.drawLine(b, t, _ps);
-    _p.color = const Color(0xFFC9D3E3);
-    c.drawPath(
-        Path()
-          ..moveTo(t.dx, t.dy - 0.22 * q)
-          ..lineTo(t.dx - 0.08 * q, t.dy + 0.02 * q)
-          ..lineTo(t.dx + 0.08 * q, t.dy + 0.02 * q)
-          ..close(),
-        _p);
+  void _enemy(Enemy e) {
+    switch (w.region.enemy) {
+      case EnemyKind.wolf:
+        _wolf(e);
+      case EnemyKind.golem:
+        _golem(e);
+      case EnemyKind.yeti:
+        _yeti(e);
+    }
+    final big = e.boss ? 1.9 : 1.0;
+    final g = cam.w2s(e.pos.dx, e.pos.dy, 0);
+    final st = e.stolen;
+    if (st.isNotEmpty) _itemS(st.first, g.translate(0, -1.0 * s * big), sc: 0.8);
+    final hb = g.translate(0, -(e.boss ? 2.9 : 1.55) * s);
+    final frac = (e.hp / e.maxHp).clamp(0.0, 1.0);
+    final boss = e.boss;
+    _late.add(() => _hpBar(hb, frac, wide: boss));
   }
 
-  void _wolf(Wolf wf) {
-    final q = s * (wf.leader ? 1.35 : 1.0);
+  void _crown(Offset head, double q) {
+    _p.color = Pal.gold;
+    c.drawPath(
+        Path()
+          ..moveTo(head.dx - 0.22 * q, head.dy)
+          ..lineTo(head.dx - 0.22 * q, head.dy - 0.2 * q)
+          ..lineTo(head.dx - 0.11 * q, head.dy - 0.08 * q)
+          ..lineTo(head.dx, head.dy - 0.26 * q)
+          ..lineTo(head.dx + 0.11 * q, head.dy - 0.08 * q)
+          ..lineTo(head.dx + 0.22 * q, head.dy - 0.2 * q)
+          ..lineTo(head.dx + 0.22 * q, head.dy)
+          ..close(),
+        _p);
+    _p.color = const Color(0xFFE5484D);
+    c.drawCircle(head.translate(0, -0.06 * q), 0.04 * q, _p);
+  }
+
+  void _wolf(Enemy wf) {
+    final q = s * (wf.boss ? 1.9 : 1.0);
     final g = cam.w2s(wf.pos.dx, wf.pos.dy, 0);
     if (!_vis(g, 2 * q)) return;
     _shadow(g, 1.3 * q, 0.45 * q, 0.2);
     final dir = cam.worldDirToScreen(Offset(math.cos(wf.facing), math.sin(wf.facing)));
     final flip = dir.dx < 0 ? -1.0 : 1.0;
-    final body = wf.leader ? const Color(0xFF7F95C2) : const Color(0xFFB9CBEA);
-    final shade = wf.leader ? const Color(0xFF4F6491) : const Color(0xFF7489B5);
+    final body = wf.boss ? const Color(0xFF7F95C2) : const Color(0xFFB9CBEA);
+    final shade = wf.boss ? const Color(0xFF4F6491) : const Color(0xFF7489B5);
     const outline = Color(0xFF34436B);
     c.save();
     c.translate(g.dx, g.dy);
     c.scale(flip, 1);
     final run = math.sin(wf.phase);
-    // legs
     _ps.color = shade;
     _ps.strokeWidth = 0.13 * q;
     for (var i = 0; i < 4; i++) {
@@ -1452,25 +2128,21 @@ class _Renderer {
       final sw = (i.isEven ? run : -run) * 0.14 * q;
       c.drawLine(Offset(lx, -0.45 * q), Offset(lx + sw, -0.06 * q), _ps);
     }
-    // tail
     _p.color = shade;
     c.save();
     c.translate(-0.52 * q, -0.62 * q);
     c.rotate(-0.6 + run * 0.15);
     c.drawOval(Rect.fromCenter(center: Offset(-0.22 * q, 0), width: 0.55 * q, height: 0.22 * q), _p);
     c.restore();
-    // body (with a dark outline so wolves read well on white ice)
-    final hc0 = Offset(0.52 * q, -0.84 * q + run * 0.03 * q);
+    final hc = Offset(0.52 * q, -0.84 * q + run * 0.03 * q);
     _p.color = outline;
     c.drawOval(Rect.fromCenter(center: Offset(0, -0.58 * q + run * 0.02 * q), width: 1.2 * q, height: 0.58 * q), _p);
-    c.drawCircle(hc0, 0.29 * q, _p);
-    c.drawOval(Rect.fromCenter(center: hc0.translate(0.24 * q, 0.06 * q), width: 0.4 * q, height: 0.28 * q), _p);
+    c.drawCircle(hc, 0.29 * q, _p);
+    c.drawOval(Rect.fromCenter(center: hc.translate(0.24 * q, 0.06 * q), width: 0.4 * q, height: 0.28 * q), _p);
     _p.color = body;
     c.drawOval(Rect.fromCenter(center: Offset(0, -0.58 * q + run * 0.02 * q), width: 1.12 * q, height: 0.5 * q), _p);
     _p.color = shade.withValues(alpha: 0.6);
     c.drawOval(Rect.fromCenter(center: Offset(-0.05 * q, -0.48 * q), width: 0.85 * q, height: 0.2 * q), _p);
-    // head
-    final hc = Offset(0.52 * q, -0.84 * q + run * 0.03 * q);
     _p.color = body;
     c.drawCircle(hc, 0.25 * q, _p);
     c.drawOval(Rect.fromCenter(center: hc.translate(0.24 * q, 0.06 * q), width: 0.32 * q, height: 0.2 * q), _p);
@@ -1490,29 +2162,123 @@ class _Renderer {
     c.drawCircle(hc.translate(0.08 * q, -0.04 * q), 0.055 * q, _p);
     _p.color = const Color(0x556FF0FF);
     c.drawCircle(hc.translate(0.08 * q, -0.04 * q), 0.11 * q, _p);
-    if (wf.leader) {
-      _p.color = const Color(0xFFBDF4FF);
-      for (var i = -1; i <= 1; i++) {
-        final bx = hc.dx + i * 0.09 * q - 0.02 * q;
-        c.drawPath(
-            Path()
-              ..moveTo(bx - 0.05 * q, hc.dy - 0.2 * q)
-              ..lineTo(bx, hc.dy - 0.42 * q - (i == 0 ? 0.08 * q : 0))
-              ..lineTo(bx + 0.05 * q, hc.dy - 0.2 * q)
-              ..close(),
-            _p);
-      }
-    }
+    if (wf.boss) _crown(hc.translate(-0.02 * q, -0.32 * q), q);
     if (wf.flash > 0) {
       _p.color = Colors.white.withValues(alpha: wf.flash * 0.85);
       c.drawOval(Rect.fromCenter(center: Offset(0.1 * q, -0.62 * q), width: 1.5 * q, height: 0.75 * q), _p);
     }
     c.restore();
-    final st = wf.stolen;
-    if (st != null) _itemS(st, g.translate(0, -0.95 * q), sc: 0.8);
-    final hb = g.translate(0, -1.45 * q);
-    final frac = (wf.hp / wf.maxHp).clamp(0.0, 1.0);
-    _late.add(() => _hpBar(hb, frac));
+  }
+
+  void _golem(Enemy e) {
+    final q = s * (e.boss ? 1.7 : 1.0);
+    final g = cam.w2s(e.pos.dx, e.pos.dy, 0);
+    if (!_vis(g, 3 * q)) return;
+    _shadow(g, 1.3 * q, 0.55 * q, 0.22);
+    final step = math.sin(e.phase);
+    final bob = step.abs() * 0.06 * q;
+    final body = e.boss ? const Color(0xFF6FA8F2) : const Color(0xFFA9DDF7);
+    final mid = e.boss ? const Color(0xFF4B86D6) : const Color(0xFF7CC3EA);
+    final dark = e.boss ? const Color(0xFF2F64B8) : const Color(0xFF4FA3D6);
+    const outline = Color(0xFF26406E);
+    void block(Rect r) {
+      _p.color = outline;
+      c.drawRRect(RRect.fromRectAndRadius(r.inflate(0.04 * q), Radius.circular(0.1 * q)), _p);
+      _p.color = mid;
+      c.drawRRect(RRect.fromRectAndRadius(r, Radius.circular(0.08 * q)), _p);
+      _p.color = body;
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(r.left, r.top, r.width * 0.62, r.height * 0.9), Radius.circular(0.08 * q)), _p);
+      _p.color = dark.withValues(alpha: 0.5);
+      c.drawRect(Rect.fromLTWH(r.right - r.width * 0.18, r.top + r.height * 0.1, r.width * 0.12, r.height * 0.8), _p);
+    }
+
+    final f = g.translate(0, -bob);
+    block(Rect.fromCenter(center: f.translate(-0.22 * q, -0.2 * q + step * 0.04 * q), width: 0.3 * q, height: 0.4 * q));
+    block(Rect.fromCenter(center: f.translate(0.22 * q, -0.2 * q - step * 0.04 * q), width: 0.3 * q, height: 0.4 * q));
+    block(Rect.fromCenter(center: f.translate(0, -0.85 * q), width: 1.05 * q, height: 0.85 * q));
+    block(Rect.fromCenter(center: f.translate(-0.68 * q, -0.75 * q + step * 0.1 * q), width: 0.32 * q, height: 0.7 * q));
+    block(Rect.fromCenter(center: f.translate(0.68 * q, -0.75 * q - step * 0.1 * q), width: 0.32 * q, height: 0.7 * q));
+    final head = f.translate(0, -1.55 * q);
+    block(Rect.fromCenter(center: head, width: 0.62 * q, height: 0.52 * q));
+    _p.color = const Color(0xFF6FF0FF);
+    c.drawCircle(head.translate(-0.13 * q, 0), 0.06 * q, _p);
+    c.drawCircle(head.translate(0.13 * q, 0), 0.06 * q, _p);
+    _p.color = const Color(0x446FF0FF);
+    c.drawCircle(head.translate(-0.13 * q, 0), 0.13 * q, _p);
+    c.drawCircle(head.translate(0.13 * q, 0), 0.13 * q, _p);
+    _prism(f.translate(-0.25 * q, -1.22 * q), -0.4, 0.3 * q, 0.07 * q, const Color(0xFFDDF6FF), const Color(0xFF8FD3F0));
+    _prism(f.translate(0.3 * q, -1.2 * q), 0.45, 0.26 * q, 0.07 * q, const Color(0xFFDDF6FF), const Color(0xFF8FD3F0));
+    if (e.boss) _crown(head.translate(0, -0.27 * q), q);
+    if (e.flash > 0) {
+      _p.color = Colors.white.withValues(alpha: e.flash * 0.8);
+      c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: f.translate(0, -0.9 * q), width: 1.6 * q, height: 1.7 * q), Radius.circular(0.2 * q)),
+          _p);
+    }
+  }
+
+  void _yeti(Enemy e) {
+    final q = s * (e.boss ? 1.75 : 1.0);
+    final g = cam.w2s(e.pos.dx, e.pos.dy, 0);
+    if (!_vis(g, 3 * q)) return;
+    _shadow(g, 1.25 * q, 0.5 * q, 0.22);
+    final dir = cam.worldDirToScreen(Offset(math.cos(e.facing), math.sin(e.facing)));
+    final fx = dir.dx / math.max(1e-6, dir.distance);
+    final step = math.sin(e.phase);
+    final fur = e.boss ? const Color(0xFFC9CED9) : const Color(0xFFF4F6FA);
+    final furDark = e.boss ? const Color(0xFF8E96A8) : const Color(0xFFC9D1E0);
+    const outline = Color(0xFF4A5470);
+    final f = g.translate(0, -step.abs() * 0.05 * q);
+    _p.color = outline;
+    c.drawOval(Rect.fromCenter(center: f.translate(-0.2 * q, -0.15 * q + step * 0.05 * q), width: 0.36 * q, height: 0.32 * q), _p);
+    c.drawOval(Rect.fromCenter(center: f.translate(0.2 * q, -0.15 * q - step * 0.05 * q), width: 0.36 * q, height: 0.32 * q), _p);
+    _p.color = furDark;
+    c.drawOval(Rect.fromCenter(center: f.translate(-0.2 * q, -0.17 * q + step * 0.05 * q), width: 0.3 * q, height: 0.26 * q), _p);
+    c.drawOval(Rect.fromCenter(center: f.translate(0.2 * q, -0.17 * q - step * 0.05 * q), width: 0.3 * q, height: 0.26 * q), _p);
+    final body = Rect.fromCenter(center: f.translate(0, -0.9 * q), width: 1.05 * q, height: 1.3 * q);
+    _p.color = outline;
+    c.drawOval(body.inflate(0.05 * q), _p);
+    _p.color = furDark;
+    c.drawOval(body, _p);
+    _p.color = fur;
+    c.drawOval(Rect.fromLTWH(body.left, body.top, body.width * 0.85, body.height * 0.92), _p);
+    for (final sd in [-1.0, 1.0]) {
+      final sh = f.translate(sd * 0.45 * q, -1.15 * q);
+      final hand = sh.translate(sd * 0.2 * q, (0.75 + sd * step * 0.15) * q);
+      _ps.color = outline;
+      _ps.strokeWidth = 0.32 * q;
+      c.drawLine(sh, hand, _ps);
+      _ps.color = furDark;
+      _ps.strokeWidth = 0.24 * q;
+      c.drawLine(sh, hand, _ps);
+      _p.color = const Color(0xFF6E7FA6);
+      c.drawCircle(hand, 0.11 * q, _p);
+    }
+    final face = f.translate(fx * 0.12 * q, -1.15 * q);
+    _p.color = const Color(0xFF8DA3D1);
+    c.drawOval(Rect.fromCenter(center: face, width: 0.52 * q, height: 0.42 * q), _p);
+    _p.color = Pal.ink;
+    c.drawCircle(face.translate(-0.11 * q, -0.04 * q), 0.045 * q, _p);
+    c.drawCircle(face.translate(0.11 * q, -0.04 * q), 0.045 * q, _p);
+    _p.color = const Color(0xFF34436B);
+    c.drawOval(Rect.fromCenter(center: face.translate(0, 0.1 * q), width: 0.2 * q, height: 0.08 * q), _p);
+    _p.color = Colors.white;
+    c.drawRect(Rect.fromLTWH(face.dx - 0.06 * q, face.dy + 0.07 * q, 0.04 * q, 0.04 * q), _p);
+    c.drawRect(Rect.fromLTWH(face.dx + 0.02 * q, face.dy + 0.07 * q, 0.04 * q, 0.04 * q), _p);
+    _p.color = const Color(0xFFDDE3EC);
+    for (final sd in [-1.0, 1.0]) {
+      c.drawPath(
+          Path()
+            ..moveTo(f.dx + sd * 0.2 * q, f.dy - 1.5 * q)
+            ..quadraticBezierTo(f.dx + sd * 0.42 * q, f.dy - 1.62 * q, f.dx + sd * 0.38 * q, f.dy - 1.85 * q)
+            ..lineTo(f.dx + sd * 0.28 * q, f.dy - 1.55 * q)
+            ..close(),
+          _p);
+    }
+    if (e.boss) _crown(f.translate(0, -1.6 * q), q);
+    if (e.flash > 0) {
+      _p.color = Colors.white.withValues(alpha: e.flash * 0.8);
+      c.drawOval(body.inflate(0.1 * q), _p);
+    }
   }
 
   // =========================================================== items
@@ -1524,6 +2290,18 @@ class _Renderer {
         _cakeS(p, sc: sc);
       case Item.chowder:
         _bowlS(p, sc: sc);
+      case Item.ore || Item.auroraOre || Item.bigOre:
+        _oreS(p, it, sc: sc);
+      case Item.ingot:
+        _ingotS(p, sc: sc);
+      case Item.lamp:
+        _lampS(p, sc: sc);
+      case Item.log || Item.goldLog || Item.bigLog:
+        _logS(p, it, ang: ang, sc: sc);
+      case Item.firewood:
+        _firewoodS(p, sc: sc);
+      case Item.sled:
+        _sledS(p, sc: sc);
     }
   }
 
@@ -1594,10 +2372,8 @@ class _Renderer {
     c.restore();
   }
 
-  void _cakeS(Offset p, {double sc = 1}) {
-    final rx = 0.27 * s * sc, ry = rx * 0.7071, hh = 0.09 * s * sc;
-    final top = p.translate(0, -hh);
-    _p.color = const Color(0xFFAE5E28);
+  void _discSide(Offset p, Offset top, double rx, double ry, Color col) {
+    _p.color = col;
     c.drawPath(
         Path()
           ..moveTo(top.dx - rx, top.dy)
@@ -1606,6 +2382,12 @@ class _Renderer {
           ..lineTo(top.dx + rx, top.dy)
           ..close(),
         _p);
+  }
+
+  void _cakeS(Offset p, {double sc = 1}) {
+    final rx = 0.27 * s * sc, ry = rx * 0.7071, hh = 0.09 * s * sc;
+    final top = p.translate(0, -hh);
+    _discSide(p, top, rx, ry, const Color(0xFFAE5E28));
     _p.color = const Color(0xFFE59A45);
     c.drawOval(Rect.fromCenter(center: top, width: rx * 2, height: ry * 2), _p);
     _p.color = const Color(0xFFF6C46C);
@@ -1635,18 +2417,130 @@ class _Renderer {
     c.drawCircle(top.translate(rx * 0.22, -ry * 0.05), rx * 0.1, _p);
   }
 
+  void _oreS(Offset p, Item kind, {double sc = 1}) {
+    final q = s * sc * (kind == Item.bigOre ? 1.25 : 1.0);
+    final (Color l, Color m, Color d) = switch (kind) {
+      Item.auroraOre => (const Color(0xFFB8FFE1), const Color(0xFF5CF0A8), const Color(0xFF26A774)),
+      Item.bigOre => (const Color(0xFFA9CCFF), const Color(0xFF5B8FE0), const Color(0xFF2F5CA8)),
+      _ => (const Color(0xFFD6F4FF), const Color(0xFF8FD8F5), const Color(0xFF4FA9D6)),
+    };
+    final o = p.translate(0, -0.1 * q);
+    if (kind == Item.auroraOre) {
+      _p.color = m.withValues(alpha: 0.3 + 0.15 * math.sin(w.time * 5));
+      c.drawCircle(o, 0.36 * q, _p);
+    }
+    final pts = [
+      o.translate(-0.3 * q, 0.06 * q),
+      o.translate(-0.18 * q, -0.14 * q),
+      o.translate(0.06 * q, -0.2 * q),
+      o.translate(0.3 * q, -0.04 * q),
+      o.translate(0.22 * q, 0.12 * q),
+      o.translate(-0.08 * q, 0.15 * q),
+    ];
+    _poly(pts, m);
+    _poly([pts[1], pts[2], o.translate(0.04 * q, -0.02 * q), o.translate(-0.14 * q, 0.0)], l);
+    _poly([pts[3], pts[4], pts[5], o.translate(0.04 * q, -0.02 * q)], d);
+  }
+
+  void _ingotS(Offset p, {double sc = 1}) {
+    final q = s * sc;
+    final top = [p.translate(-0.24 * q, -0.12 * q), p.translate(0.08 * q, -0.2 * q), p.translate(0.28 * q, -0.12 * q), p.translate(-0.04 * q, -0.04 * q)];
+    final bottom = [p.translate(-0.3 * q, 0), p.translate(-0.04 * q, 0.07 * q), p.translate(0.32 * q, -0.02 * q)];
+    _poly([top[0], top[3], bottom[1], bottom[0]], const Color(0xFF7FCDEB));
+    _poly([top[3], top[2], bottom[2], bottom[1]], const Color(0xFF4FA9D6));
+    _poly(top, const Color(0xFFC7F1FF));
+    _ps.color = Colors.white.withValues(alpha: 0.8);
+    _ps.strokeWidth = math.max(1, 0.03 * q);
+    c.drawLine(top[0].translate(0.08 * q, -0.01 * q), top[1].translate(-0.04 * q, 0.03 * q), _ps);
+  }
+
+  void _lampS(Offset p, {double sc = 1}) {
+    final q = s * sc;
+    final glow = 0.75 + 0.25 * math.sin(w.time * 4 + p.dx * 0.05);
+    _p.color = const Color(0xFF7FE7FF).withValues(alpha: 0.18 * glow);
+    c.drawCircle(p.translate(0, -0.2 * q), 0.34 * q, _p);
+    _p.color = const Color(0xFF3B3F52);
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: p.translate(0, -0.03 * q), width: 0.36 * q, height: 0.08 * q), Radius.circular(0.03 * q)), _p);
+    _p.color = Color.lerp(const Color(0xFF7FE7FF), Colors.white, 0.4 * glow)!;
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: p.translate(0, -0.18 * q), width: 0.26 * q, height: 0.24 * q), Radius.circular(0.06 * q)), _p);
+    _ps.color = const Color(0xFF3B3F52);
+    _ps.strokeWidth = math.max(1, 0.035 * q);
+    c.drawLine(p.translate(-0.13 * q, -0.06 * q), p.translate(-0.13 * q, -0.3 * q), _ps);
+    c.drawLine(p.translate(0.13 * q, -0.06 * q), p.translate(0.13 * q, -0.3 * q), _ps);
+    _p.color = const Color(0xFF3B3F52);
+    c.drawPath(
+        Path()
+          ..moveTo(p.dx - 0.18 * q, p.dy - 0.3 * q)
+          ..lineTo(p.dx, p.dy - 0.42 * q)
+          ..lineTo(p.dx + 0.18 * q, p.dy - 0.3 * q)
+          ..close(),
+        _p);
+    c.drawArc(Rect.fromCenter(center: p.translate(0, -0.45 * q), width: 0.14 * q, height: 0.12 * q), math.pi, math.pi, false, _ps);
+  }
+
+  void _logS(Offset p, Item kind, {double ang = 0, double sc = 1}) {
+    final q = s * sc * (kind == Item.bigLog ? 1.2 : 1.0);
+    final bark = kind == Item.goldLog ? const Color(0xFFD4A017) : (kind == Item.bigLog ? const Color(0xFF6B3F22) : Pal.barkLight);
+    final barkDark = kind == Item.goldLog ? const Color(0xFFA67C00) : (kind == Item.bigLog ? const Color(0xFF4A2A14) : Pal.bark);
+    c.save();
+    c.translate(p.dx, p.dy - 0.1 * q);
+    c.rotate(ang * 0.5);
+    final r = Rect.fromCenter(center: Offset.zero, width: 0.78 * q, height: 0.24 * q);
+    _p.color = barkDark;
+    c.drawRRect(RRect.fromRectAndRadius(r, Radius.circular(0.12 * q)), _p);
+    _p.color = bark;
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(r.left, r.top, r.width, r.height * 0.6), Radius.circular(0.1 * q)), _p);
+    _p.color = Pal.ring;
+    c.drawOval(Rect.fromCenter(center: Offset(r.right - 0.06 * q, 0), width: 0.16 * q, height: 0.24 * q), _p);
+    _ps.color = const Color(0xFFB98454);
+    _ps.strokeWidth = math.max(1, 0.02 * q);
+    c.drawOval(Rect.fromCenter(center: Offset(r.right - 0.06 * q, 0), width: 0.08 * q, height: 0.13 * q), _ps);
+    if (kind == Item.goldLog) {
+      _ps.color = const Color(0xFFFFF59D).withValues(alpha: 0.6 + 0.3 * math.sin(w.time * 8));
+      _ps.strokeWidth = 0.035 * q;
+      c.drawRRect(RRect.fromRectAndRadius(r.inflate(0.04 * q), Radius.circular(0.15 * q)), _ps);
+    }
+    c.restore();
+  }
+
+  void _firewoodS(Offset p, {double sc = 1}) {
+    final q = sc * 0.55;
+    _logS(p.translate(-0.11 * s * sc, 0.02 * s * sc), Item.log, sc: q);
+    _logS(p.translate(0.11 * s * sc, 0.0), Item.log, sc: q);
+    _logS(p.translate(0, -0.1 * s * sc), Item.log, sc: q);
+    _p.color = const Color(0xFFE5484D);
+    c.drawRect(Rect.fromCenter(center: p.translate(-0.02 * s * sc, -0.1 * s * sc), width: 0.05 * s * sc, height: 0.24 * s * sc), _p);
+  }
+
+  void _sledS(Offset p, {double sc = 1}) {
+    final q = s * sc;
+    _ps.color = const Color(0xFF8E2A20);
+    _ps.strokeWidth = math.max(1.2, 0.05 * q);
+    for (final dy in [-0.02, 0.06]) {
+      final b = p.translate(0, dy * q);
+      c.drawPath(
+          Path()
+            ..moveTo(b.dx - 0.32 * q, b.dy)
+            ..lineTo(b.dx + 0.26 * q, b.dy)
+            ..quadraticBezierTo(b.dx + 0.38 * q, b.dy, b.dx + 0.36 * q, b.dy - 0.12 * q),
+          _ps);
+    }
+    _p.color = Pal.woodLight;
+    c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(p.dx - 0.3 * q, p.dy - 0.15 * q, 0.56 * q, 0.1 * q), Radius.circular(0.03 * q)), _p);
+    _p.color = Pal.wood;
+    c.drawRect(Rect.fromLTWH(p.dx - 0.3 * q, p.dy - 0.08 * q, 0.56 * q, 0.03 * q), _p);
+    _ps.color = Pal.woodDark;
+    _ps.strokeWidth = math.max(1, 0.025 * q);
+    for (var i = 0; i < 4; i++) {
+      final x = p.dx - 0.22 * q + i * 0.14 * q;
+      c.drawLine(Offset(x, p.dy - 0.15 * q), Offset(x, p.dy - 0.05 * q), _ps);
+    }
+  }
+
   void _coinS(Offset p, {double sc = 1}) {
     final rx = 0.2 * s * sc, ry = rx * 0.7071, hh = 0.055 * s * sc;
     final top = p.translate(0, -hh);
-    _p.color = const Color(0xFFC8890F);
-    c.drawPath(
-        Path()
-          ..moveTo(top.dx - rx, top.dy)
-          ..lineTo(p.dx - rx, p.dy)
-          ..arcToPoint(Offset(p.dx + rx, p.dy), radius: Radius.elliptical(rx, ry), clockwise: false)
-          ..lineTo(top.dx + rx, top.dy)
-          ..close(),
-        _p);
+    _discSide(p, top, rx, ry, const Color(0xFFC8890F));
     _p.color = const Color(0xFFFFD447);
     c.drawOval(Rect.fromCenter(center: top, width: rx * 2, height: ry * 2), _p);
     _ps.color = const Color(0xFFE9AE1E);
@@ -1744,6 +2638,13 @@ class _Renderer {
         case PK.spark || PK.splash || PK.ember:
           _p.color = p.color.withValues(alpha: 1 - u * 0.7);
           c.drawCircle(sp, p.size * s * (1 - u * 0.5), _p);
+        case PK.chip:
+          c.save();
+          c.translate(sp.dx, sp.dy);
+          c.rotate(p.rot);
+          _p.color = p.color.withValues(alpha: 1 - u * 0.6);
+          c.drawRect(Rect.fromCenter(center: Offset.zero, width: p.size * s * 1.6, height: p.size * s), _p);
+          c.restore();
         case PK.confetti:
           c.save();
           c.translate(sp.dx, sp.dy);
@@ -1752,14 +2653,14 @@ class _Renderer {
           c.drawRect(Rect.fromCenter(center: Offset.zero, width: p.size * s * 1.4, height: p.size * s * 0.8), _p);
           c.restore();
         case PK.steam:
-          _p.color = Colors.white.withValues(alpha: 0.45 * (1 - u));
+          _p.color = (w.region.source == SourceKind.quarry ? const Color(0xFFB9C2D3) : Colors.white)
+              .withValues(alpha: 0.45 * (1 - u));
           c.drawCircle(sp, p.size * s * (0.6 + u * 1.2), _p);
         case PK.ring:
-          final g = cam.w2s(p.x, p.y, p.z);
           _ps.color = Colors.white.withValues(alpha: 1 - u);
           _ps.strokeWidth = 0.12 * s * (1 - u) + 1;
           final r = (0.6 + u * 2.6) * s;
-          c.drawOval(Rect.fromCenter(center: g, width: r * 2, height: r * 1.414), _ps);
+          c.drawOval(Rect.fromCenter(center: sp, width: r * 2, height: r * 1.414), _ps);
         case PK.heart:
           final r = p.size * s * 0.5;
           final o = sp.translate(0, -u * 0.6 * s);
@@ -1778,8 +2679,8 @@ class _Renderer {
   }
 
   // =========================================================== world ui
-  void _hpBar(Offset p, double f) {
-    final wd = 0.9 * s, h = 0.13 * s;
+  void _hpBar(Offset p, double f, {bool wide = false}) {
+    final wd = (wide ? 1.8 : 0.9) * s, h = (wide ? 0.18 : 0.13) * s;
     final r = Rect.fromCenter(center: p, width: wd, height: h);
     _p.color = const Color(0xB31A1F33);
     c.drawRRect(RRect.fromRectAndRadius(r.inflate(2), Radius.circular(h)), _p);
@@ -1799,8 +2700,7 @@ class _Renderer {
 
   void _maxBadge(Offset p) {
     final bob = math.sin(w.time * 6) * 0.05 * s;
-    final label = Tr.t('max');
-    final tp = _tp(label, 0.3 * s, Colors.white);
+    final tp = _tp(Tr.t('max'), 0.3 * s, Colors.white);
     final r = RRect.fromRectAndRadius(
         Rect.fromCenter(center: p.translate(0, bob), width: tp.width + 0.36 * s, height: tp.height + 0.18 * s), Radius.circular(0.2 * s));
     _p.color = const Color(0xFFE5383B);
@@ -1844,9 +2744,8 @@ class _Renderer {
         final cu2 = k.crowd[i];
         final head = cam.w2s(cu2.pos.dx, cu2.pos.dy, 2.2 + cu2.hop);
         if (!_vis(head, 40)) continue;
-        final r = 0.3 * s;
         _p.color = Colors.white.withValues(alpha: 0.92);
-        c.drawCircle(head, r, _p);
+        c.drawCircle(head, 0.3 * s, _p);
         _itemS(k.product, head.translate(0, 0.08 * s), sc: 0.55);
       }
     }
@@ -1855,6 +2754,14 @@ class _Renderer {
       if ((t.def.pos - w.player.pos).distance > 2.8) continue;
       final p = cam.w2s(t.def.pos.dx, t.def.pos.dy, w.groundZ(t.def.pos) + 1.25);
       _text(Tr.t(t.def.name), p, 0.4 * s, Colors.white, stroke: const Color(0xFF203A66));
+    }
+    for (final t in w.levelTiles) {
+      if (!w.levelTileVisible(t) || t.appear < 1) continue;
+      if ((t.pos - w.player.pos).distance > 2.2) continue;
+      final p = cam.w2s(t.pos.dx, t.pos.dy, 1.1);
+      _text('${Tr.station(t.kind, w.region)} • ${Tr.t('level')} ${w.sl(t.kind) + 1}→${w.sl(t.kind) + 2}', p, 0.34 * s,
+          Colors.white,
+          stroke: const Color(0xFF14412F));
     }
     for (final t in w.texts) {
       final u = t.life / t.max;
@@ -1909,9 +2816,10 @@ class _Renderer {
     final f = w.raid.freeze;
     if (f <= 0.01) return;
     final rect = Offset.zero & size;
+    final tint = w.raid.boss ? const Color(0xFFFFD6D6) : const Color(0xFFD9EEFF);
     final paint = Paint()
-      ..shader = ui.Gradient.radial(rect.center, size.longestSide * 0.65,
-          [const Color(0x00FFFFFF), const Color(0xFFD9EEFF).withValues(alpha: 0.6 * f)], const [0.5, 1.0]);
+      ..shader = ui.Gradient.radial(rect.center, size.longestSide * 0.65, [const Color(0x00FFFFFF), tint.withValues(alpha: 0.6 * f)],
+          const [0.5, 1.0]);
     c.drawRect(rect, paint);
   }
 
@@ -1948,10 +2856,4 @@ class _Renderer {
     _p.color = const Color(0xE6FFFFFF);
     c.drawCircle(o + d, 25, _p);
   }
-}
-
-String _fmt(int v) {
-  if (v >= 100000) return '${(v / 1000).toStringAsFixed(0)}K';
-  if (v >= 10000) return '${(v / 1000).toStringAsFixed(1)}K';
-  return '$v';
 }

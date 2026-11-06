@@ -164,6 +164,43 @@ def gen_victory():
     save('victory.wav', x, 0.8)
 
 
+def gen_chop():
+    t = t_axis(0.22)
+    knock = np.sin(2 * np.pi * (260 - 260 * t) * t) * np.exp(-30 * t)
+    crack = highpass(rng.standard_normal(len(t)), 1800) * np.exp(-45 * t)
+    save('chop.wav', knock * 0.9 + crack * 0.5, 0.7)
+
+
+def gen_mine():
+    t = t_axis(0.3)
+    ring = (np.sin(2 * np.pi * 1760 * t) + 0.6 * np.sin(2 * np.pi * 2637 * t)) * np.exp(-14 * t)
+    tick = highpass(rng.standard_normal(len(t)), 3000) * np.exp(-60 * t)
+    save('mine.wav', ring * 0.5 + tick * 0.8, 0.6)
+
+
+def gen_quest():
+    x = np.zeros(int(SR * 0.9))
+    for i, m in enumerate([79, 83, 86, 91]):
+        b = bell(note_freq(m), 0.5, ratio=3.0, index=1.2, decay=6)
+        off = int(SR * 0.09 * i)
+        x[off:off + len(b)] += b
+    save('quest.wav', x, 0.75)
+
+
+def gen_boss():
+    t = t_axis(1.8)
+    ph = 2 * np.pi * np.cumsum(110 * (1 + 0.01 * np.sin(2 * np.pi * 4 * t))) / SR
+    horn = lowpass(sum(np.sin(k * ph) / k for k in range(1, 10)), 900)
+    e = np.clip(t / 0.2, 0, 1) * np.clip((1.8 - t) / 0.5, 0, 1)
+    drum = np.zeros(len(t))
+    for start in (0.0, 0.45, 0.9):
+        i0 = int(SR * start)
+        dt = t_axis(0.4)
+        hit = np.sin(2 * np.pi * (70 - 40 * dt) * dt) * np.exp(-9 * dt)
+        drum[i0:i0 + len(hit)] += hit[:len(drum) - i0]
+    save('boss.wav', horn * e * 0.8 + drum * 0.9, 0.85)
+
+
 # ------------------------------------------------------------------ music
 def gen_music():
     bpm = 92
@@ -240,6 +277,6 @@ def gen_music():
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     for g in (gen_throw, gen_hit, gen_pop, gen_coin, gen_unlock, gen_alarm, gen_howl, gen_poof,
-              gen_snowball, gen_victory, gen_music):
+              gen_snowball, gen_victory, gen_chop, gen_mine, gen_quest, gen_boss, gen_music):
         g()
     print('audio generated in', os.path.abspath(OUT))

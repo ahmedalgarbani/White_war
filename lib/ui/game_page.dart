@@ -40,14 +40,20 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   SaveStore? _store;
   bool _title = true;
   bool _shop = false;
+  int _shopTab = 0;
   bool _settings = false;
+  bool _questsOpen = false;
+  bool _expedition = false;
   bool _confirmReset = false;
   bool _vibration = true;
   bool _hasSave = false;
+  int _offline = 0;
+  bool _offlineShown = false;
   double _saveTimer = 0;
   double _shownMoney = 0;
   double _moneyPulse = 0;
   double _gemPulse = 0;
+  double _questPulse = 0;
   double _hapticCd = 0;
   int _lastMoney = 0;
   int _lastGems = 0;
@@ -55,6 +61,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   final Set<LogicalKeyboardKey> _keys = {};
   final FocusNode _focus = FocusNode();
   EdgeInsets _pad = EdgeInsets.zero;
+
+  bool get _panelOpen => _shop || _settings || _questsOpen || _expedition || (_offline > 0 && _offlineShown);
 
   @override
   void initState() {
@@ -72,8 +80,13 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     if (store != null) {
       final data = store.load();
       if (data != null) {
-        world.loadJson(data);
-        _hasSave = world.progress > 0 || world.money > 0;
+        world = GameWorld.fromSave(data);
+        _hasSave = world.progress > 0 || world.money > 0 || world.completed > 0;
+        final last = data['lastSeen'];
+        if (last is num) {
+          final away = (DateTime.now().millisecondsSinceEpoch - last.toInt()) / 1000.0;
+          _offline = world.offlineReward(away);
+        }
       }
       final l = store.lang;
       if (l != null) Tr.lang = l;
@@ -82,11 +95,15 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _vibration = store.vibration;
     }
     if (kIsWeb) _applyWebParams();
+    _syncCounters();
+    if (mounted) setState(() {});
+    await audio.init();
+  }
+
+  void _syncCounters() {
     _shownMoney = world.money.toDouble();
     _lastMoney = world.money;
     _lastGems = world.crystals;
-    if (mounted) setState(() {});
-    await audio.init();
   }
 
   /// Query parameters used for automated testing of the web build.
@@ -94,18 +111,32 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     final q = Uri.base.queryParameters;
     final l = q['lang'];
     if (l == 'ar' || l == 'en') Tr.lang = l!;
+    final region = int.tryParse(q['region'] ?? '');
+    if (region != null) {
+      world = GameWorld(regionIndex: region.clamp(0, regions.length - 1), star: int.tryParse(q['star'] ?? '') ?? 0);
+    }
     final demo = q['demo'];
     if (demo != null) world.applyDemo(demo);
     if (q['raid'] == '1') world.triggerRaidSoon();
+    if (q['boss'] == '1') world.triggerRaidSoon(boss: true);
     final x = double.tryParse(q['x'] ?? ''), y = double.tryParse(q['y'] ?? '');
     if (x != null && y != null) {
       world.player.pos = Offset(x, y);
       world.cam.cx = x;
       world.cam.cy = y;
     }
+    final off = int.tryParse(q['offline'] ?? '');
+    if (off != null) _offline = off;
     if (q['autostart'] == '1') {
       _title = false;
       world.started = true;
+      _offlineShown = true;
+    }
+    if (q['panel'] == 'quests') _questsOpen = true;
+    if (q['panel'] == 'map') _expedition = true;
+    if (q['panel'] == 'wardrobe') {
+      _shop = true;
+      _shopTab = 1;
     }
   }
 
@@ -141,15 +172,14 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     _last = elapsed;
     if (dt <= 0) return;
     if (dt > 0.05) dt = 0.05;
-    final paused = _shop || _settings;
-    if (!paused) {
+    if (!_panelOpen) {
       world.input = _title ? Offset.zero : _inputVector();
       world.update(dt);
     }
     _hapticCd -= dt;
     for (final s in world.sfx) {
       audio.play(s);
-      if (s == Sfx.pop && _hapticCd <= 0) {
+      if ((s == Sfx.pop || s == Sfx.chop || s == Sfx.mine) && _hapticCd <= 0) {
         _haptic();
         _hapticCd = 0.15;
       }
@@ -169,6 +199,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     }
     _moneyPulse = math.max(0, _moneyPulse - dt * 4);
     _gemPulse = math.max(0, _gemPulse - dt * 4);
+    _questPulse = math.max(0, _questPulse - dt * 1.5);
     _shownMoney += (world.money - _shownMoney) * math.min(1, dt * 12);
     if ((world.money - _shownMoney).abs() < 0.6) _shownMoney = world.money.toDouble();
     if (_banners.isNotEmpty) {
@@ -189,18 +220,26 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _haptic(heavy: true);
       _save();
     } else if (e == 'zoneB') {
-      _pushBanner(Tr.t('chowderHouse'), Tr.t('newArea'), const Color(0xFF5CF0A8), 2.6);
+      _pushBanner(Tr.t('zoneB_${world.region.key}'), Tr.t('newArea'), const Color(0xFF5CF0A8), 2.6);
       _haptic(heavy: true);
       _save();
     } else if (e == 'raid_start') {
       _pushBanner(Tr.t('raidNow'), Tr.t('raidSub'), const Color(0xFFFF6B6B), 2.8);
       _haptic(heavy: true);
+    } else if (e == 'boss_start') {
+      _pushBanner(Tr.t('bossNow'), Tr.t('bossSub'), const Color(0xFFD291FF), 3.2);
+      _haptic(heavy: true);
     } else if (e.startsWith('raid_end:')) {
       _pushBanner(Tr.t('victory'), '+${e.substring(9)} ${Tr.t('crystals')}', const Color(0xFFFFD447), 2.4);
       _save();
-    } else if (e == 'lighthouse') {
-      _pushBanner(Tr.t('lighthouse'), Tr.t('lighthouseDone'), const Color(0xFFFFD447), 3.4);
+    } else if (e == 'landmark') {
+      _pushBanner(Tr.t('landmark_${world.region.key}'), Tr.t('landmarkDone'), const Color(0xFFFFD447), 3.6);
       _haptic(heavy: true);
+      _save();
+    } else if (e == 'quest') {
+      _questPulse = 1;
+      _haptic();
+    } else if (e.startsWith('level:')) {
       _save();
     }
   }
@@ -256,7 +295,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   }
 
   void _down(PointerDownEvent e) {
-    if (_title || _shop || _settings || joy.pointer != null) return;
+    if (_title || _panelOpen || joy.pointer != null) return;
     joy.pointer = e.pointer;
     joy.origin = e.localPosition;
     joy.pos = e.localPosition;
@@ -280,28 +319,46 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     setState(() {
       _title = false;
       world.started = true;
+      _offlineShown = true;
     });
     audio.startMusic();
     _focus.requestFocus();
   }
 
-  void _openShop() => setState(() {
-        _shop = true;
-        joy.clear();
-      });
-
-  void _openSettings() => setState(() {
-        _settings = true;
-        _confirmReset = false;
+  void _open(void Function() f) => setState(() {
+        f();
         joy.clear();
       });
 
   void _closePanels() => setState(() {
         _shop = false;
         _settings = false;
+        _questsOpen = false;
+        _expedition = false;
         _confirmReset = false;
         _focus.requestFocus();
       });
+
+  void _collectOffline() {
+    world.grantMoney(_offline);
+    setState(() => _offline = 0);
+    _haptic(heavy: true);
+  }
+
+  void _travel() {
+    if (!world.regionComplete) return;
+    final next = world.travel();
+    setState(() {
+      world = next;
+      _expedition = false;
+      _banners.clear();
+      _syncCounters();
+    });
+    _pushBanner(Tr.region(world.region), Tr.t('regiondesc_${world.region.key}'), const Color(0xFF8FE3FF), 3.4);
+    audio.play(Sfx.victory);
+    _haptic(heavy: true);
+    _save();
+  }
 
   Future<void> _reset() async {
     await _store?.clear();
@@ -310,10 +367,9 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       _confirmReset = false;
       _settings = false;
       _hasSave = false;
-      _shownMoney = 0;
-      _lastMoney = 0;
-      _lastGems = 0;
+      _offline = 0;
       _banners.clear();
+      _syncCounters();
     });
   }
 
@@ -325,7 +381,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     world.hudCoin = Offset(_pad.left + 12 + 23, _pad.top + 10 + 20);
     world.hudGem = Offset(_pad.left + 12 + 23, _pad.top + 56 + 20);
     return PopScope(
-      canPop: !(_shop || _settings),
+      canPop: !_panelOpen,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _closePanels();
       },
@@ -373,47 +429,36 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           Positioned(
             left: _pad.left + 12,
             top: _pad.top + 10,
-            child: HudPill(icon: const CoinIcon(), text: _fmtMoney(_shownMoney.round()), pulse: _moneyPulse),
+            child: HudPill(icon: const CoinIcon(), text: fmtNum(_shownMoney.round()), pulse: _moneyPulse),
           ),
           Positioned(
             left: _pad.left + 12,
             top: _pad.top + 56,
-            child: HudPill(icon: const GemIcon(), text: '${world.crystals}', pulse: _gemPulse, width: 96),
+            child: HudPill(icon: const GemIcon(), text: fmtNum(world.crystals), pulse: _gemPulse, width: 96),
           ),
-          Positioned(
-            right: _pad.right + 70,
-            top: _pad.top + 12,
-            child: _harborBar(),
-          ),
+          Positioned(left: _pad.left + 12, top: _pad.top + 102, child: _questTracker()),
+          Positioned(right: _pad.right + 70, top: _pad.top + 12, child: _regionBar()),
           Positioned(
             right: _pad.right + 10,
             top: _pad.top + 6,
-            child: RoundIconButton(icon: Icons.settings_rounded, onTap: _openSettings),
+            child: RoundIconButton(icon: Icons.settings_rounded, onTap: () => _open(() {
+                  _settings = true;
+                  _confirmReset = false;
+                })),
           ),
-          Positioned(
-            top: _pad.top + 104,
-            left: 0,
-            right: 0,
-            child: Center(child: _raidChip()),
-          ),
-          Positioned(
-            right: _pad.right + 14,
-            bottom: _pad.bottom + 18,
-            child: _workshopButton(),
-          ),
+          Positioned(right: _pad.right + 10, top: _pad.top + 62, child: _raidChip()),
+          Positioned(right: _pad.right + 14, bottom: _pad.bottom + 18, child: _workshopButton()),
+          Positioned(left: _pad.left + 14, bottom: _pad.bottom + 18, child: _expeditionButton()),
           if (_banners.isNotEmpty) Positioned.fill(child: IgnorePointer(child: _bannerView(_banners.first))),
         ],
         if (_title) Positioned.fill(child: _titleView()),
         if (_shop) Positioned.fill(child: _shopView()),
         if (_settings) Positioned.fill(child: _settingsView()),
+        if (_questsOpen) Positioned.fill(child: _questView()),
+        if (_expedition) Positioned.fill(child: _expeditionView()),
+        if (!_title && _offline > 0 && _offlineShown && !_shop && !_settings) Positioned.fill(child: _offlineView()),
       ],
     );
-  }
-
-  String _fmtMoney(int v) {
-    if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(2)}M';
-    if (v >= 100000) return '${(v / 1000).toStringAsFixed(0)}K';
-    return '$v';
   }
 
   String _mmss(double t) {
@@ -421,10 +466,11 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
   }
 
-  Widget _harborBar() {
+  Widget _regionBar() {
     final f = world.progress / world.progressMax;
+    final stars = world.star > 0 ? ' ${'★' * math.min(world.star, 3)}${world.star > 3 ? world.star : ''}' : '';
     return Container(
-      width: 118,
+      width: 132,
       padding: const EdgeInsets.fromLTRB(10, 4, 10, 7),
       decoration: BoxDecoration(
         color: const Color(0xD914284A),
@@ -434,20 +480,73 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('${Tr.t('harbor')} ${world.progress}/${world.progressMax}', style: gs(13)),
-          const SizedBox(height: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('${Tr.region(world.region)}$stars', style: gs(13, color: const Color(0xFFFFE28A))),
+          ),
+          const SizedBox(height: 2),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: SizedBox(
               height: 8,
-              child: LinearProgressIndicator(
-                value: f,
-                backgroundColor: Colors.white24,
-                color: const Color(0xFF39D98A),
-              ),
+              child: LinearProgressIndicator(value: f, backgroundColor: Colors.white24, color: const Color(0xFF39D98A)),
             ),
           ),
+          const SizedBox(height: 1),
+          Text('${world.progress}/${world.progressMax}', style: gs(11, color: Colors.white70)),
         ],
+      ),
+    );
+  }
+
+  Widget _questTracker() {
+    final claimable = world.claimableQuests;
+    final q = world.quests.where((q) => !q.done).firstOrNull ?? world.quests.firstOrNull;
+    if (q == null) return const SizedBox.shrink();
+    final pulse = claimable > 0 ? 0.5 + 0.5 * math.sin(world.time * 6) : _questPulse;
+    return GestureDetector(
+      onTap: () => _open(() => _questsOpen = true),
+      child: Container(
+        width: 176,
+        padding: const EdgeInsets.fromLTRB(8, 5, 8, 6),
+        decoration: BoxDecoration(
+          color: Color.lerp(const Color(0xD914284A), const Color(0xF2B8860B), claimable > 0 ? pulse * 0.8 : 0),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.35 + 0.5 * pulse), width: 2),
+        ),
+        child: claimable > 0
+            ? Row(
+                children: [
+                  const Icon(Icons.card_giftcard_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('${Tr.t('claim')}! ($claimable)', style: gs(15))),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.flag_rounded, color: Color(0xFFFFD447), size: 16),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(Tr.quest(q.kind, q.target, world.region),
+                            maxLines: 1, overflow: TextOverflow.ellipsis, style: gs(12.5)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: SizedBox(
+                      height: 6,
+                      child: LinearProgressIndicator(
+                          value: q.progress / q.target, backgroundColor: Colors.white24, color: const Color(0xFFFFD447)),
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -456,14 +555,16 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     final r = world.raid;
     if (!r.enabled) return const SizedBox.shrink();
     final active = r.active;
+    final boss = active ? r.boss : world.nextRaidIsBoss;
     final urgent = !active && r.timer < 10;
     final pulse = 0.5 + 0.5 * math.sin(world.time * 8);
-    final color = active
-        ? const Color(0xF2E5383B)
-        : (urgent ? Color.lerp(const Color(0xD914284A), const Color(0xF2E5383B), pulse)! : const Color(0xD914284A));
-    final txt = active ? '${Tr.t('raidNow')}  ${world.wolvesLeft}' : '${Tr.t('raidIn')} ${_mmss(r.timer)}';
+    final hot = boss ? const Color(0xF29B4DE0) : const Color(0xF2E5383B);
+    final color = active ? hot : (urgent ? Color.lerp(const Color(0xD914284A), hot, pulse)! : const Color(0xD914284A));
+    final label = active
+        ? '${Tr.t(boss ? 'bossNow' : 'raidNow')}  ${world.enemiesLeft}'
+        : '${Tr.t(boss ? 'bossIn' : 'raidIn')} ${_mmss(r.timer)}';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(16),
@@ -472,22 +573,18 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(active ? Icons.pets : Icons.ac_unit_rounded, color: Colors.white, size: 18),
-          const SizedBox(width: 6),
-          Text(txt, style: gs(15)),
+          Icon(active ? Icons.pets : (boss ? Icons.whatshot_rounded : Icons.ac_unit_rounded), color: Colors.white, size: 17),
+          const SizedBox(width: 5),
+          Text(label, style: gs(14)),
         ],
       ),
     );
   }
 
-  Widget _workshopButton() {
-    final can = Upg.values.any((u) {
-      final c = world.upgCost(u);
-      return c >= 0 && world.crystals >= c;
-    });
-    final bob = can ? math.sin(world.time * 5) * 3 : 0.0;
+  Widget _roundAction({required IconData icon, required String label, required VoidCallback onTap, required List<Color> colors, bool alert = false}) {
+    final bob = alert ? math.sin(world.time * 5) * 3 : 0.0;
     return GestureDetector(
-      onTap: _openShop,
+      onTap: onTap,
       child: Transform.translate(
         offset: Offset(0, bob),
         child: Column(
@@ -497,21 +594,17 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  width: 64,
-                  height: 64,
+                  width: 62,
+                  height: 62,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0xFFFFB067), Color(0xFFF27A2A)],
-                    ),
+                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: colors),
                     border: Border.all(color: Colors.white, width: 3),
                     boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 8, offset: Offset(0, 4))],
                   ),
-                  child: const Icon(Icons.handyman_rounded, color: Colors.white, size: 34),
+                  child: Icon(icon, color: Colors.white, size: 32),
                 ),
-                if (can)
+                if (alert)
                   Positioned(
                     right: -4,
                     top: -4,
@@ -530,10 +623,34 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               ],
             ),
             const SizedBox(height: 2),
-            StrokeText(Tr.t('workshop'), size: 14, strokeWidth: 4),
+            StrokeText(label, size: 14, strokeWidth: 4),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _workshopButton() {
+    final can = Upg.values.any((u) {
+      final c = world.upgCost(u);
+      return c >= 0 && world.crystals >= c;
+    });
+    return _roundAction(
+      icon: Icons.handyman_rounded,
+      label: Tr.t('workshop'),
+      onTap: () => _open(() => _shop = true),
+      colors: const [Color(0xFFFFB067), Color(0xFFF27A2A)],
+      alert: can,
+    );
+  }
+
+  Widget _expeditionButton() {
+    return _roundAction(
+      icon: Icons.map_rounded,
+      label: Tr.t('expedition'),
+      onTap: () => _open(() => _expedition = true),
+      colors: const [Color(0xFF6FD3FF), Color(0xFF2E7FD8)],
+      alert: world.regionComplete,
     );
   }
 
@@ -551,7 +668,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              StrokeText(b.title, size: 42, color: b.color, strokeWidth: 9),
+              StrokeText(b.title, size: 40, color: b.color, strokeWidth: 9),
               if (b.sub != null)
                 Container(
                   margin: const EdgeInsets.only(top: 6),
@@ -585,6 +702,12 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             const Spacer(flex: 2),
             Transform.translate(offset: Offset(0, math.sin(t * 1.6) * 6), child: _logo()),
             const Spacer(flex: 3),
+            if (_hasSave)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text('${Tr.region(world.region)}${world.star > 0 ? '  ★${world.star}' : ''}',
+                    style: gs(16, color: const Color(0xFFFFE28A))),
+              ),
             Transform.scale(
               scale: 1 + 0.05 * math.sin(t * 4),
               child: GameButton(
@@ -636,7 +759,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white, width: 2),
           ),
-          child: Text('FROST HARBOR • ميناء الصقيع', style: gs(14)),
+          child: Text('EXPEDITION • الرحلة', style: gs(14)),
         ),
       ],
     );
@@ -669,14 +792,52 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     );
   }
 
-  Widget _dimmed({required Widget child, Alignment align = Alignment.center}) {
+  Widget _dimmed({required Widget child, Alignment align = Alignment.center, VoidCallback? onDismiss}) {
     return GestureDetector(
-      onTap: _closePanels,
+      onTap: onDismiss ?? _closePanels,
       child: Container(
         color: const Color(0x99000000),
         alignment: align,
         child: SafeArea(child: GestureDetector(onTap: () {}, child: child)),
       ),
+    );
+  }
+
+  Widget _tabs(List<String> labels, int selected, ValueChanged<int> onTap) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: const Color(0xFF0E1B33), borderRadius: BorderRadius.circular(16)),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: GestureDetector(
+                onTap: () => onTap(i),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 7),
+                  decoration: BoxDecoration(
+                    color: i == selected ? const Color(0xFF2E5C9E) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(labels[i], style: gs(15, color: i == selected ? Colors.white : Colors.white60)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _gemHeader() {
+    return Row(
+      children: [
+        const GemIcon(size: 24),
+        const SizedBox(width: 6),
+        Text(fmtNum(world.crystals), style: gs(24)),
+        const SizedBox(width: 12),
+        Expanded(child: Text(Tr.t('gemsHint'), style: gs(12, weight: 500, color: Colors.white70, height: 1.3))),
+      ],
     );
   }
 
@@ -691,17 +852,14 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  const GemIcon(size: 24),
-                  const SizedBox(width: 6),
-                  Text('${world.crystals}', style: gs(24)),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(Tr.t('gemsHint'), style: gs(12, weight: 500, color: Colors.white70, height: 1.3))),
-                ],
-              ),
+              _tabs([Tr.t('upgrades'), Tr.t('wardrobe')], _shopTab, (i) => setState(() => _shopTab = i)),
               const SizedBox(height: 12),
-              for (final u in Upg.values) _upgRow(u),
+              _gemHeader(),
+              const SizedBox(height: 12),
+              if (_shopTab == 0)
+                for (final u in Upg.values) _upgRow(u)
+              else
+                _wardrobe(),
             ],
           ),
         ),
@@ -718,7 +876,8 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       Upg.rate => Icons.speed_rounded,
       Upg.capacity => Icons.inventory_2_rounded,
       Upg.speed => Icons.directions_run_rounded,
-      Upg.kitchen => Icons.soup_kitchen_rounded,
+      Upg.helpers => Icons.groups_rounded,
+      Upg.income => Icons.trending_up_rounded,
     };
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -744,7 +903,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
                   children: [
                     for (var i = 0; i < upgMax; i++)
                       Container(
-                        width: 13,
+                        width: 11,
                         height: 6,
                         margin: const EdgeInsetsDirectional.only(end: 3),
                         decoration: BoxDecoration(
@@ -780,6 +939,288 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _wardrobe() {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      alignment: WrapAlignment.center,
+      children: [
+        for (var i = 0; i < outfits.length; i++) _outfitCard(i),
+      ],
+    );
+  }
+
+  Widget _outfitCard(int i) {
+    final o = outfits[i];
+    final owned = world.outfitsOwned.contains(i);
+    final wearing = world.outfit == i;
+    final can = owned || world.crystals >= o.cost;
+    return Container(
+      width: 120,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: wearing ? const Color(0xFF2E5C9E) : const Color(0xFF213B66),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: wearing ? const Color(0xFFFFD447) : Colors.transparent, width: 2),
+      ),
+      child: Column(
+        children: [
+          SizedBox(width: 64, height: 64, child: CustomPaint(painter: _OutfitPainter(o.look))),
+          const SizedBox(height: 4),
+          Text(Tr.t('outfit_${o.key}'), style: gs(13.5), textAlign: TextAlign.center),
+          const SizedBox(height: 6),
+          if (wearing)
+            Text(Tr.t('wearing'), style: gs(14, color: const Color(0xFFFFD447)))
+          else
+            GameButton(
+              enabled: can,
+              onTap: () {
+                if (world.buyOutfit(i)) {
+                  setState(() {});
+                  _haptic(heavy: true);
+                  _save();
+                }
+              },
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              radius: 12,
+              color: owned ? const Color(0xFF39D98A) : const Color(0xFF39B5F0),
+              shade: owned ? const Color(0xFF1E8F58) : const Color(0xFF1F7FB3),
+              child: owned
+                  ? Text(Tr.t('wear'), style: gs(15))
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [const GemIcon(size: 16), const SizedBox(width: 3), Text('${o.cost}', style: gs(15))],
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _questView() {
+    return _dimmed(
+      child: Panel(
+        title: Tr.t('quests'),
+        onClose: _closePanels,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [for (var i = 0; i < world.quests.length; i++) _questRow(i)],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _questRow(int i) {
+    final q = world.quests[i];
+    final icon = switch (q.kind) {
+      QuestKind.harvest => Icons.agriculture_rounded,
+      QuestKind.rare => Icons.auto_awesome_rounded,
+      QuestKind.sellA || QuestKind.sellB => Icons.storefront_rounded,
+      QuestKind.defeat => Icons.shield_rounded,
+      QuestKind.earn => Icons.savings_rounded,
+      QuestKind.levelUp => Icons.upgrade_rounded,
+      QuestKind.unlock => Icons.lock_open_rounded,
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: q.done ? const Color(0xFF2B5A3E) : const Color(0xFF213B66),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: q.done ? const Color(0xFF5CF0A8) : Colors.transparent, width: 2),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(color: const Color(0xFF2E5C9E), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: const Color(0xFFFFD447), size: 26),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(Tr.quest(q.kind, q.target, world.region), style: gs(15)),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: SizedBox(
+                    height: 8,
+                    child: LinearProgressIndicator(
+                        value: q.progress / q.target, backgroundColor: Colors.white24, color: const Color(0xFFFFD447)),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text('${fmtNum(q.progress)}/${fmtNum(q.target)}', style: gs(12, color: Colors.white70)),
+                    const Spacer(),
+                    if (q.coins > 0) ...[const CoinIcon(size: 15), const SizedBox(width: 3), Text(fmtNum(q.coins), style: gs(13))],
+                    if (q.gems > 0) ...[const SizedBox(width: 8), const GemIcon(size: 15), const SizedBox(width: 3), Text('${q.gems}', style: gs(13))],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          GameButton(
+            enabled: q.done,
+            onTap: () {
+              if (world.claimQuest(i)) {
+                setState(() {});
+                _haptic(heavy: true);
+                _save();
+              }
+            },
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            radius: 12,
+            color: const Color(0xFFFFB13D),
+            shade: const Color(0xFFC77A12),
+            child: Text(Tr.t('claim'), style: gs(15)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _expeditionView() {
+    final nextIdx = (world.regionIndex + 1) % regions.length;
+    final next = regions[nextIdx];
+    final bonus = (world.completed * 25);
+    return _dimmed(
+      child: Panel(
+        title: '${Tr.t('expedition')}${world.star > 0 ? '  ★${world.star}' : ''}',
+        onClose: _closePanels,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final r in regions) _regionRow(r),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(Icons.trending_up_rounded, color: Color(0xFF5CF0A8), size: 20),
+                  const SizedBox(width: 6),
+                  Text('${Tr.t('bonus')}: +$bonus%', style: gs(15, color: const Color(0xFF5CF0A8))),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(Tr.t('loopInfo'), style: gs(12, weight: 500, color: Colors.white70, height: 1.35)),
+              const SizedBox(height: 14),
+              if (world.regionComplete) ...[
+                Text(Tr.t('travelInfo'), textAlign: TextAlign.center, style: gs(13, weight: 600, color: Colors.white, height: 1.35)),
+                const SizedBox(height: 10),
+                GameButton(
+                  onTap: _travel,
+                  color: const Color(0xFF39B5F0),
+                  shade: const Color(0xFF1F7FB3),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.sailing_rounded, color: Colors.white),
+                      const SizedBox(width: 8),
+                      Text('${Tr.t('travelTo')} ${Tr.region(next)}', style: gs(18)),
+                    ],
+                  ),
+                ),
+              ] else
+                Text(Tr.t('travelLocked'), textAlign: TextAlign.center, style: gs(14, color: const Color(0xFFFFE28A))),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _regionRow(RegionDef r) {
+    final here = r.index == world.regionIndex;
+    final done = r.index < world.regionIndex || (here && world.regionComplete);
+    final icon = switch (r.source) {
+      SourceKind.river => Icons.set_meal_rounded,
+      SourceKind.quarry => Icons.diamond_rounded,
+      SourceKind.grove => Icons.forest_rounded,
+    };
+    final color = switch (r.source) {
+      SourceKind.river => const Color(0xFF3D8BEA),
+      SourceKind.quarry => const Color(0xFF8E5BD6),
+      SourceKind.grove => const Color(0xFF2E9E5B),
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: here ? const Color(0xFF2E5C9E) : const Color(0xFF213B66),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: here ? const Color(0xFFFFD447) : Colors.transparent, width: 2),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+            child: Icon(icon, color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(Tr.region(r), style: gs(17)),
+                Text(Tr.t('regiondesc_${r.key}'), style: gs(11.5, weight: 500, color: Colors.white70)),
+              ],
+            ),
+          ),
+          if (done)
+            const Icon(Icons.check_circle_rounded, color: Color(0xFF5CF0A8), size: 26)
+          else if (here)
+            Text(Tr.t('current'), style: gs(12, color: const Color(0xFFFFD447)))
+          else
+            const Icon(Icons.lock_rounded, color: Colors.white38, size: 22),
+        ],
+      ),
+    );
+  }
+
+  Widget _offlineView() {
+    return _dimmed(
+      onDismiss: _collectOffline,
+      child: Panel(
+        title: Tr.t('welcomeBack'),
+        onClose: _collectOffline,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.nights_stay_rounded, color: Color(0xFFFFE28A), size: 44),
+              const SizedBox(height: 6),
+              Text(Tr.t('offlineEarned'), textAlign: TextAlign.center, style: gs(16)),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [const CoinIcon(size: 30), const SizedBox(width: 8), Text(fmtNum(_offline), style: gs(32))],
+              ),
+              const SizedBox(height: 14),
+              GameButton(
+                onTap: _collectOffline,
+                color: const Color(0xFFFFB13D),
+                shade: const Color(0xFFC77A12),
+                child: Text(Tr.t('collect'), style: gs(20)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -868,4 +1309,45 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
       ),
     );
   }
+}
+
+/// Small portrait of an outfit for the wardrobe.
+class _OutfitPainter extends CustomPainter {
+  _OutfitPainter(this.look);
+
+  final Look look;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final q = size.width / 1.6;
+    final f = Offset(size.width / 2, size.height * 0.98);
+    final p = Paint()..isAntiAlias = true;
+    canvas.drawOval(Rect.fromCenter(center: f.translate(0, -0.05 * q), width: 0.9 * q, height: 0.3 * q), p..color = const Color(0x33000000));
+    final bc = f.translate(0, -0.64 * q);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: bc, width: 0.84 * q, height: 0.86 * q), Radius.circular(0.38 * q)),
+        p..color = look.coatDark);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: bc.translate(-0.05 * q, -0.04 * q), width: 0.7 * q, height: 0.76 * q),
+            Radius.circular(0.33 * q)),
+        p..color = look.coat);
+    canvas.drawOval(Rect.fromCenter(center: f.translate(0, -0.27 * q), width: 0.86 * q, height: 0.2 * q), p..color = look.trim);
+    final scarf = look.scarf;
+    if (scarf != null) {
+      canvas.drawRRect(
+          RRect.fromRectAndRadius(Rect.fromCenter(center: f.translate(0, -0.99 * q), width: 0.68 * q, height: 0.18 * q),
+              Radius.circular(0.09 * q)),
+          p..color = scarf);
+    }
+    final hc = f.translate(0, -1.2 * q);
+    canvas.drawCircle(hc, 0.44 * q, p..color = look.coat);
+    canvas.drawCircle(hc.translate(0, 0.03 * q), 0.35 * q, p..color = look.trim);
+    canvas.drawCircle(hc.translate(0, 0.04 * q), 0.27 * q, p..color = look.skin);
+    p.color = const Color(0xFF1E2238);
+    canvas.drawOval(Rect.fromCenter(center: hc.translate(-0.095 * q, 0.03 * q), width: 0.065 * q, height: 0.095 * q), p);
+    canvas.drawOval(Rect.fromCenter(center: hc.translate(0.095 * q, 0.03 * q), width: 0.065 * q, height: 0.095 * q), p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _OutfitPainter oldDelegate) => oldDelegate.look != look;
 }
