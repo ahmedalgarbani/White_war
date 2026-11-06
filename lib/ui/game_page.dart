@@ -338,6 +338,7 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
           child: LayoutBuilder(builder: (context, cons) {
             final size = cons.biggest;
             world.cam.size = size;
+            world.cam.dpr = mq.devicePixelRatio.clamp(1.0, 3.0);
             world.cam.scale = (size.shortestSide / 12.0).clamp(24.0, 58.0);
             return Stack(
               children: [

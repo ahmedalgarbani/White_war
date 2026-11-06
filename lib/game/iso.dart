@@ -11,6 +11,7 @@ class IsoCamera {
   double cx = 0;
   double cy = 0;
   double scale = 40;
+  double dpr = 1;
   Size size = const Size(400, 800);
   double focusY = 0.5;
   Offset shake = Offset.zero;

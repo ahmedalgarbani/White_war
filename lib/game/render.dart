@@ -143,7 +143,7 @@ class _Renderer {
         s = w.cam.scale,
         size = w.cam.size;
 
-  final Canvas c;
+  Canvas c;
   final GameWorld w;
   final Joy joy;
   final IsoCamera cam;
@@ -160,6 +160,50 @@ class _Renderer {
 
   bool _vis(Offset p, double m) =>
       p.dx > -m && p.dx < size.width + m && p.dy > -m && p.dy < size.height + m;
+
+  // =========================================================== sprite cache
+  // Static scenery (trees, fence logs) and the idle crowd are rendered once
+  // into textures and then drawn with a single call each frame.
+  static final Map<String, ui.Image> _sprites = {};
+  static final Expando<(int, ui.Image)> _personSprites = Expando();
+  static double _spriteScale = -1, _spriteDpr = -1;
+  static int _spriteGen = 0;
+  static final Paint _imgPaint = Paint()..filterQuality = FilterQuality.low;
+
+  void _validateSprites() {
+    if (_spriteScale != s || _spriteDpr != cam.dpr) {
+      for (final i in _sprites.values) {
+        i.dispose();
+      }
+      _sprites.clear();
+      _spriteGen++;
+      _spriteScale = s;
+      _spriteDpr = cam.dpr;
+    }
+  }
+
+  ui.Image _renderSprite(double w, double h, double ax, double ay, void Function() draw) {
+    final dpr = cam.dpr;
+    final rec = ui.PictureRecorder();
+    final saved = c;
+    c = Canvas(rec);
+    c.scale(dpr);
+    c.translate(ax, ay);
+    draw();
+    final pic = rec.endRecording();
+    c = saved;
+    final img = pic.toImageSync(math.max(1, (w * dpr).ceil()), math.max(1, (h * dpr).ceil()));
+    pic.dispose();
+    return img;
+  }
+
+  ui.Image _sprite(String key, double w, double h, double ax, double ay, void Function() draw) =>
+      _sprites[key] ??= _renderSprite(w, h, ax, ay, draw);
+
+  void _blit(ui.Image img, Offset at, double w, double h, double ax, double ay) {
+    c.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+        Rect.fromLTWH(at.dx - ax, at.dy - ay, w, h), _imgPaint);
+  }
 
   void _poly(List<Offset> pts, Color col) {
     _p.color = col;
@@ -234,6 +278,7 @@ class _Renderer {
 
   // =========================================================== frame
   void draw() {
+    _validateSprites();
     _p.shader = null;
     _p.color = Pal.snow;
     c.drawRect(Offset.zero & size, _p);
@@ -411,7 +456,7 @@ class _Renderer {
     c.drawPath(_roundQuad(r.inflate(0.12), 0, 0.8), _p..color = Pal.campEdge);
     c.drawPath(_roundQuad(r.deflate(0.2), 0, 0.7), _p..color = Pal.camp);
     // pebbles & footprints
-    for (var i = 0; i < 90; i++) {
+    for (var i = 0; i < 55; i++) {
       final px = r.left + 0.5 + _h1(i + 1200) * (r.width - 1.0);
       final py = r.top + 0.5 + _h1(i + 1300) * (r.height - 1.0);
       final sp = cam.w2s(px, py, 0);
@@ -673,10 +718,7 @@ class _Renderer {
             _person(cu.pos, 0, cu.facing, cu.walk, cu.move, cu.look, hop: cu.hop);
           }
         case _kCrowd:
-          {
-            final cu = d.o as Customer;
-            _person(cu.pos, 0, cu.facing, 0, 0, cu.look, hop: cu.hop, simple: true);
-          }
+          _crowdMember(d.o as Customer);
         case _kCannon:
           _cannon(d.o as Cannon);
         case _kWolf:
@@ -690,14 +732,38 @@ class _Renderer {
     }
   }
 
+  void _crowdMember(Customer cu) {
+    final g = cam.w2s(cu.pos.dx, cu.pos.dy, 0);
+    _shadow(g, 0.82 * s, 0.38 * s, 0.17);
+    final w = 1.04 * s, h = 2.0 * s, ax = 0.52 * s, ay = 1.92 * s;
+    var rec = _personSprites[cu];
+    if (rec == null || rec.$1 != _spriteGen) {
+      rec = (
+        _spriteGen,
+        _renderSprite(w, h, ax, ay,
+            () => _person(cu.pos, 0, cu.facing, 0, 0, cu.look, simple: true, at: Offset.zero, shadow: false)),
+      );
+      _personSprites[cu] = rec;
+    }
+    _blit(rec.$2, g.translate(0, -cu.hop * s * kZ), w, h, ax, ay);
+  }
+
   void _tree(Tree t) {
     final g = cam.w2s(t.pos.dx, t.pos.dy, 0);
-    final q = s * t.size;
+    final sb = ((t.size - 0.75) / 0.12).round().clamp(0, 5);
+    final tb = (t.tint * 2).round().clamp(0, 2);
+    final q = s * (0.75 + sb * 0.12);
+    final w = 1.64 * q, h = 2.36 * q, ax = 0.7 * q, ay = 2.02 * q;
+    final img = _sprite('tree$sb-$tb', w, h, ax, ay, () => _treeAt(Offset.zero, q, tb / 2));
+    _blit(img, g, w, h, ax, ay);
+  }
+
+  void _treeAt(Offset g, double q, double tint) {
     _shadow(g.translate(0.18 * q, 0.04 * q), 1.3 * q, 0.5 * q, 0.12);
     _p.color = const Color(0xFF7A4B2C);
     c.drawRect(Rect.fromLTWH(g.dx - 0.08 * q, g.dy - 0.42 * q, 0.16 * q, 0.42 * q), _p);
-    final green = Color.lerp(Pal.pine, const Color(0xFF3D8270), t.tint)!;
-    final dark = Color.lerp(Pal.pineDark, const Color(0xFF2B6356), t.tint)!;
+    final green = Color.lerp(Pal.pine, const Color(0xFF3D8270), tint)!;
+    final dark = Color.lerp(Pal.pineDark, const Color(0xFF2B6356), tint)!;
     for (var i = 0; i < 3; i++) {
       final base = g.dy - (0.3 + i * 0.44) * q;
       final apex = base - (0.95 - i * 0.12) * q;
@@ -742,6 +808,12 @@ class _Renderer {
 
   void _post(Offset p) {
     final g = cam.w2s(p.dx, p.dy, 0);
+    final w = 0.36 * s, h = 0.88 * s, ax = 0.18 * s, ay = 0.74 * s;
+    final img = _sprite('post', w, h, ax, ay, () => _postAt(Offset.zero));
+    _blit(img, g, w, h, ax, ay);
+  }
+
+  void _postAt(Offset g) {
     final r = 0.15 * s, ry = r * 0.7071, h = 0.82 * kZ * s;
     final top = g.translate(0, -h);
     _p.color = Pal.wood;
@@ -1196,13 +1268,20 @@ class _Renderer {
   }
 
   void _person(Offset pos, double z, double facing, double walk, double move, Look lk,
-      {double sc = 1, double hop = 0, double action = 0, bool carrying = false, bool simple = false, int tool = 0}) {
+      {double sc = 1,
+      double hop = 0,
+      double action = 0,
+      bool carrying = false,
+      bool simple = false,
+      int tool = 0,
+      Offset? at,
+      bool shadow = true}) {
     if (sc <= 0.01) return;
     final q = s * sc;
-    final g = cam.w2s(pos.dx, pos.dy, z);
-    if (!_vis(g, 2 * q)) return;
+    final g = at ?? cam.w2s(pos.dx, pos.dy, z);
+    if (at == null && !_vis(g, 2 * q)) return;
     final f = g.translate(0, -hop * s * kZ);
-    _shadow(g, 0.82 * q, 0.38 * q, 0.17);
+    if (shadow) _shadow(g, 0.82 * q, 0.38 * q, 0.17);
     final fd = cam.worldDirToScreen(Offset(math.cos(facing), math.sin(facing)));
     final fl = math.max(1e-6, fd.distance);
     final fx = fd.dx / fl, fy = fd.dy / fl;

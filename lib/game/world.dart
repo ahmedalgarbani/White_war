@@ -1594,7 +1594,7 @@ class GameWorld {
         c.target = k.entry + Offset(rr(-1.2, 1.2), rr(-1.2, 1.2));
         c.hopV = 3.2;
         parts.add(Particle(PK.heart, c.pos.dx, c.pos.dy, 2.0, 0, 0, 1.2, 1.1, 0.3, const Color(0xFFFF5D7A)));
-        texts.add(FloatText(c.pos, 2.1, '+${c.want * priceOf(k.product)}', const Color(0xFFFFD447)));
+        texts.add(FloatText(c.pos, 2.9, '+${c.want * priceOf(k.product)}', const Color(0xFFFFD447)));
       }
     }
     for (final c in k.leaving) {
