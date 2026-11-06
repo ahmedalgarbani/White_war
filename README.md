@@ -75,6 +75,8 @@ flutter build apk --release  # → build/app/outputs/flutter-apk/app-release.apk
 ```
 Every push to `main` also builds the APK on GitHub Actions and publishes it as a release
 (`.github/workflows/build-apk.yml`): `https://github.com/ahmedalgarbani/White_war/releases/latest/download/white-war.apk`.
+These CI builds are signed with the build machine's own debug key, so Android won't install one as an update over
+`releases/WhiteWar.apk` (or the other way round) — pick one source and stick to it.
 
 ### Project layout
 | Path | What |
