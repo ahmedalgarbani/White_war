@@ -1,0 +1,35 @@
+{
+  "name": "White War: Frost Harbor",
+  "short_name": "White War",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0B2447",
+  "theme_color": "#2B5C9E",
+  "description": "White War: Frost Harbor - fish, cook, sell, expand and win the Snow War.",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icons/Icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/Icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/Icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/Icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

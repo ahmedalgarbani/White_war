@@ -1,0 +1,28 @@
+name: white_war
+description: "White War: Frost Harbor - an original idle-arcade snow game (fish, cook, sell, expand and win the Snow War)."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.6
+  audioplayers: ^6.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/audio/
+  fonts:
+    - family: Baloo
+      fonts:
+        - asset: assets/fonts/BalooBhaijaan2.ttf
